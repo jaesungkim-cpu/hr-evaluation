@@ -73,14 +73,21 @@ export function formatDateTime(date: Date | string): string {
   return `${year}-${month}-${day} ${hours}:${minutes}`;
 }
 
-export function hashPassword(password: string): string {
-  const crypto = require('crypto');
-  return crypto.createHash('sha256').update(password).digest('hex');
+export async function hashPassword(password: string): Promise<string> {
+  if (typeof window === 'undefined') {
+    const crypto = await import('crypto');
+    return crypto.createHash('sha256').update(password).digest('hex');
+  }
+  // Client-side fallback using Web Crypto API
+  const encoder = new TextEncoder();
+  const data = encoder.encode(password);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-export function verifyPassword(password: string, hash: string): boolean {
-  const crypto = require('crypto');
-  const newHash = crypto.createHash('sha256').update(password).digest('hex');
+export async function verifyPassword(password: string, hash: string): Promise<boolean> {
+  const newHash = await hashPassword(password);
   return newHash === hash;
 }
 
@@ -143,13 +150,13 @@ export function parseExcelDate(excelDate: string | number): Date {
   return new Date(excelDate);
 }
 
-export function exportToExcel(
+export async function exportToExcel(
   filename: string,
   sheetName: string,
   headers: string[],
   data: Record<string, any>[]
-): void {
-  const XLSX = require('xlsx');
+): Promise<void> {
+  const XLSX = await import('xlsx');
 
   const ws = XLSX.utils.json_to_sheet(data, { header: headers });
   const wb = XLSX.utils.book_new();
