@@ -1,18 +1,20 @@
 import { createClient } from '@supabase/supabase-js';
 
-let supabaseServer: any = null;
+let _client: any = null;
 
-try {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder';
-  supabaseServer = createClient(supabaseUrl, supabaseKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  });
-} catch (e) {
-  supabaseServer = null;
+function getClient() {
+  if (!_client) {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+    if (url) {
+      _client = createClient(url, key, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+    }
+  }
+  return _client;
 }
 
-export { supabaseServer };
+export const supabaseServer = {
+  from: (...args: any[]) => getClient()?.from(...args),
+};
