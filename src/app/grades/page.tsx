@@ -82,9 +82,9 @@ export default function GradesPage() {
           const statsMap = new Map<string, GradeStats>();
 
           if (evaluations) {
-            evaluations.forEach((eval) => {
-              const emp = employees.find((e) => e.id === eval.evaluatee_id);
-              if (emp && eval.grade) {
+            evaluations.forEach((ev) => {
+              const emp = employees.find((e) => e.id === ev.evaluatee_id);
+              if (emp && ev.grade) {
                 const key = `${emp.group_type}_${emp.department}`;
 
                 if (!statsMap.has(key)) {
@@ -103,7 +103,7 @@ export default function GradesPage() {
                 }
 
                 const stats = statsMap.get(key)!;
-                stats.grades[eval.grade as Grade]++;
+                stats.grades[ev.grade as Grade]++;
                 stats.total++;
               }
             });
