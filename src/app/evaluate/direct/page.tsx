@@ -35,6 +35,12 @@ export default function EvaluatePage() {
   const [submitStatus, setSubmitStatus] = useState<"draft"|"submitted">("draft");
   // 2nd eval grades
   const [grades, setGrades] = useState<Record<string,string>>({});
+  const [groupFilter, setGroupFilter] = useState<string>("all");
+  const [adjustRequest, setAdjustRequest] = useState<Record<string,string>>({});
+  const [showDetailCols, setShowDetailCols] = useState(false);
+  const [secondDetailEmp, setSecondDetailEmp] = useState<Emp|null>(null);
+  const [secondDetailScores, setSecondDetailScores] = useState<Record<string,number>>({delivery:4,quality:4,efficiency:4,leadership:4,growth:4,ethics:4});
+  const [secondDetailGrade, setSecondDetailGrade] = useState("");
 
   useEffect(()=>{loadData();},[]);
   const loadData = async () => {
@@ -399,15 +405,37 @@ export default function EvaluatePage() {
                   </div>
                 </div>
                 <div className="bg-white rounded-lg shadow">
-                  <div className="p-4 border-b flex justify-between items-center"><h2 className="text-lg font-bold text-primary">등급 부여</h2><div className="flex space-x-3"><button onClick={handleSaveGrades} disabled={saving} className="flex items-center space-x-2 px-4 py-2 bg-secondary text-white rounded-lg text-sm disabled:opacity-50"><Save size={14}/><span>등록저장</span></button><button onClick={()=>{handleSaveGrades();setSubmitStatus("submitted");}} className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg text-sm"><Send size={14}/><span>제출완료</span></button></div></div>
-                  <div className="overflow-x-auto"><table className="w-full text-xs"><thead className="bg-light"><tr><th className="text-left px-3 py-2">성명</th><th className="text-left px-3 py-2">팀</th><th className="text-center px-3 py-2">직책분류</th><th className="text-center px-3 py-2">1차평가</th><th className="text-center px-3 py-2">팀평균</th><th className="text-center px-3 py-2">본부평균</th><th className="text-center px-3 py-2">조정점수</th><th className="text-center px-3 py-2">권장등급</th><th className="text-center px-3 py-2">최종등급</th><th className="text-center px-3 py-2">비고</th></tr></thead>
-                    <tbody>{evaluatees.map(emp=>{
+                  <div className="p-4 border-b flex justify-between items-center">
+                    <div className="flex items-center space-x-4"><h2 className="text-lg font-bold text-primary">등급 부여</h2>
+                      <div className="flex space-x-2">{[{v:"all",l:"전체"},{v:"팀장급",l:"팀장이상"},{v:"팀원",l:"팀원"},{v:"제외",l:"평가제외"}].map(f=>(<button key={f.v} onClick={()=>setGroupFilter(f.v)} className={`px-3 py-1 rounded-full text-xs font-medium transition ${groupFilter===f.v?"bg-primary text-white":"bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>{f.l}</button>))}</div>
+                      <button onClick={()=>setShowDetailCols(!showDetailCols)} className="px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700 hover:bg-blue-200">{showDetailCols?"상세 숨기기":"상세 펼치기"}</button>
+                    </div>
+                    <div className="flex space-x-3"><button onClick={handleSaveGrades} disabled={saving} className="flex items-center space-x-2 px-4 py-2 bg-secondary text-white rounded-lg text-sm disabled:opacity-50"><Save size={14}/><span>등록저장</span></button><button onClick={()=>{handleSaveGrades();setSubmitStatus("submitted");}} className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg text-sm"><Send size={14}/><span>제출완료</span></button></div>
+                  </div>
+                  <div className="overflow-x-auto"><table className="w-full text-xs"><thead className="bg-light"><tr><th className="text-left px-3 py-2">성명</th><th className="text-left px-3 py-2">팀</th><th className="text-center px-3 py-2">직책분류</th>{showDetailCols&&<><th className="text-center px-2 py-2">납기</th><th className="text-center px-2 py-2">품질</th><th className="text-center px-2 py-2">효율</th><th className="text-center px-2 py-2">리더십</th><th className="text-center px-2 py-2">성장</th><th className="text-center px-2 py-2">윤리</th><th className="text-center px-2 py-2">연봉</th></>}<th className="text-center px-3 py-2">1차평가</th><th className="text-center px-3 py-2">팀평균</th><th className="text-center px-3 py-2">본부평균</th><th className="text-center px-3 py-2">조정점수</th><th className="text-center px-3 py-2">권장등급</th><th className="text-center px-3 py-2">최종등급</th><th className="text-center px-3 py-2">조정요청</th></tr></thead>
+                    <tbody>{evaluatees.filter(emp=>groupFilter==="all"?true:groupFilter==="제외"?!emp.is_evaluated:emp.group_type===groupFilter).map(emp=>{
                       const ev = getFirstEval(emp.id);
+                      const sc = ev?.content_json?.scores||{};
                       const ts = ev?.content_json?.totalScore || 0;
-                      const deptAvg = evaluatees.filter(e=>e.group_type===emp.group_type).reduce((s,e)=>{const v=getFirstEval(e.id);return s+(v?.content_json?.totalScore||0);},0)/(evaluatees.filter(e=>e.group_type===emp.group_type).length||1);
+                      const sameGroup = evaluatees.filter(e=>e.group_type===emp.group_type&&e.is_evaluated);
+                      const deptAvg = sameGroup.reduce((s,e)=>{const v=getFirstEval(e.id);return s+(v?.content_json?.totalScore||0);},0)/(sameGroup.length||1);
+                      const adjustedScore = ts && deptAvg ? Math.round(ts*(ts/deptAvg)*10)/10 : 0;
+                      const sortedScores = sameGroup.map(e=>{const v=getFirstEval(e.id);const t=v?.content_json?.totalScore||0;return t&&deptAvg?t*(t/deptAvg):0;}).sort((a,b)=>b-a);
+                      const rank = sortedScores.indexOf(adjustedScore)+1;
+                      const pct = sameGroup.length>0?Math.round(rank/sameGroup.length*100):0;
+                      const recommendGrade = pct<=30?"상":pct<=70?"중":"하";
                       const existingGrade = getEval(emp.id,"department_evaluation")?.content_json?.finalGrade;
                       const currentGrade = grades[emp.id] || existingGrade || "";
-                      return(<tr key={emp.id} className="border-b hover:bg-blue-50"><td className="px-3 py-2 font-medium">{emp.name}</td><td className="px-3 py-2 text-gray-600">{emp.team}</td><td className="px-3 py-2 text-center"><span className={`px-1.5 py-0.5 rounded text-xs font-bold ${emp.group_type==="팀장급"?"bg-purple-100 text-purple-700":"bg-blue-100 text-blue-700"}`}>{emp.group_type}</span></td><td className="px-3 py-2 text-center font-bold">{ts||"-"}</td><td className="px-3 py-2 text-center">{ts?Math.round(ts*10)/10:"-"}</td><td className="px-3 py-2 text-center">{Math.round(deptAvg*10)/10}</td><td className="px-3 py-2 text-center font-bold">{ts?Math.round(ts*(ts/(deptAvg||1))*10)/10:"-"}</td><td className="px-3 py-2 text-center">-</td><td className="px-3 py-2 text-center"><div className="flex justify-center space-x-1">{["상","중","하"].map(g=>(<button key={g} onClick={()=>setGrades({...grades,[emp.id]:currentGrade===g?"":g})} className={`w-8 h-8 rounded font-bold text-xs transition ${currentGrade===g?(g==="상"?"bg-green-500 text-white":g==="중"?"bg-yellow-500 text-white":"bg-red-500 text-white"):"bg-gray-100 text-gray-500 hover:bg-gray-200"}`}>{g}</button>))}</div></td><td className="px-3 py-2 text-center text-xs">-</td></tr>);
+                      const currentAdj = adjustRequest[emp.id] || "";
+                      return(<tr key={emp.id} className="border-b hover:bg-blue-50">
+                        <td className="px-3 py-2"><button onClick={()=>{setSecondDetailEmp(emp);setSecondDetailScores(sc.delivery?sc:{delivery:4,quality:4,efficiency:4,leadership:4,growth:4,ethics:4});setSecondDetailGrade(currentGrade);}} className="text-secondary hover:text-primary font-bold underline">{emp.name}</button></td>
+                        <td className="px-3 py-2 text-gray-600">{emp.team}</td><td className="px-3 py-2 text-center"><span className={`px-1.5 py-0.5 rounded text-xs font-bold ${emp.group_type==="팀장급"?"bg-purple-100 text-purple-700":"bg-blue-100 text-blue-700"}`}>{emp.group_type}</span></td>
+                        {showDetailCols&&<><td className="px-2 py-2 text-center">{sc.delivery||"-"}</td><td className="px-2 py-2 text-center">{sc.quality||"-"}</td><td className="px-2 py-2 text-center">{sc.efficiency||"-"}</td><td className="px-2 py-2 text-center">{sc.leadership||"-"}</td><td className="px-2 py-2 text-center">{sc.growth||"-"}</td><td className="px-2 py-2 text-center">{sc.ethics||"-"}</td><td className="px-2 py-2 text-center text-gray-400">-</td></>}
+                        <td className="px-3 py-2 text-center font-bold">{ts||"-"}</td><td className="px-3 py-2 text-center">{ts?Math.round(ts*10)/10:"-"}</td><td className="px-3 py-2 text-center">{Math.round(deptAvg*10)/10}</td><td className="px-3 py-2 text-center font-bold">{adjustedScore||"-"}</td>
+                        <td className="px-3 py-2 text-center"><span className={`px-1.5 py-0.5 rounded text-xs font-bold ${ts?(recommendGrade==="상"?"bg-green-100 text-green-700":recommendGrade==="중"?"bg-yellow-100 text-yellow-700":"bg-red-100 text-red-700"):"bg-gray-100 text-gray-400"}`}>{ts?recommendGrade:"-"}</span></td>
+                        <td className="px-3 py-2 text-center"><div className="flex justify-center space-x-1">{["상","중","하"].map(g=>(<button key={g} onClick={()=>setGrades({...grades,[emp.id]:currentGrade===g?"":g})} className={`w-8 h-8 rounded font-bold text-xs transition ${currentGrade===g?(g==="상"?"bg-green-500 text-white":g==="중"?"bg-yellow-500 text-white":"bg-red-500 text-white"):"bg-gray-100 text-gray-500 hover:bg-gray-200"}`}>{g}</button>))}</div></td>
+                        <td className="px-3 py-2 text-center"><select value={currentAdj} onChange={e=>setAdjustRequest({...adjustRequest,[emp.id]:e.target.value})} className="w-20 text-xs border border-gray-300 rounded py-1"><option value="">-</option><option value="S추천">S추천</option><option value="A추천">A추천</option><option value="D부여">D부여</option></select></td>
+                      </tr>);
                     })}</tbody></table></div>
                 </div>
               </div>
@@ -415,6 +443,40 @@ export default function EvaluatePage() {
           </div>
         </div>
       </div>
+
+      {/* 2nd Eval Detail Modal */}
+      {secondDetailEmp && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={()=>setSecondDetailEmp(null)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+            <div className="flex items-center justify-between p-6 border-b sticky top-0 bg-white rounded-t-xl"><h2 className="text-xl font-bold text-primary">{secondDetailEmp.name} 평가 상세</h2><button onClick={()=>setSecondDetailEmp(null)} className="text-gray-400 hover:text-gray-600"><X size={24}/></button></div>
+            <div className="p-6 space-y-6">
+              <div className="grid grid-cols-4 gap-3 text-sm"><div className="bg-light p-2 rounded"><span className="text-gray-500">본부</span><p className="font-medium">{secondDetailEmp.department}</p></div><div className="bg-light p-2 rounded"><span className="text-gray-500">팀</span><p className="font-medium">{secondDetailEmp.team}</p></div><div className="bg-light p-2 rounded"><span className="text-gray-500">직책</span><p className="font-medium">{secondDetailEmp.title}</p></div><div className="bg-light p-2 rounded"><span className="text-gray-500">그룹</span><p className="font-medium">{secondDetailEmp.group_type}</p></div></div>
+              
+              {/* 1차 평가 결과 */}
+              {(()=>{const ev=getFirstEval(secondDetailEmp.id);if(!ev) return <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3"><p className="text-yellow-700 text-sm font-bold">1차 평가 미등록</p></div>;const c=ev.content_json;return(<div className="space-y-4">
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4"><p className="font-bold text-amber-700 text-sm mb-2">1차 평가 결과 (평가자: {c.evaluator?.name||"-"})</p>
+                  {c.achievements?.length>0&&<div className="mb-3">{c.achievements.map((a:string,i:number)=>(<p key={i} className="text-xs text-gray-700 mb-1">• {a.substring(0,100)}{a.length>100?"...":""}</p>))}</div>}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-white rounded p-3"><p className="text-xs text-gray-500 mb-2">성과평가</p><div className="flex justify-between text-xs"><span>납기: {c.scores?.delivery||"-"}</span><span>품질: {c.scores?.quality||"-"}</span><span>효율: {c.scores?.efficiency||"-"}</span></div><p className="font-bold text-primary mt-1">합계: {c.perfScore||"-"}</p></div>
+                    <div className="bg-white rounded p-3"><p className="text-xs text-gray-500 mb-2">역량평가</p><div className="flex justify-between text-xs"><span>리더십: {c.scores?.leadership||"-"}</span><span>성장: {c.scores?.growth||"-"}</span><span>윤리: {c.scores?.ethics||"-"}</span></div><p className="font-bold text-primary mt-1">합계: {c.compScore||"-"}</p></div>
+                  </div>
+                  <div className="mt-3 bg-primary text-white rounded p-3 text-center"><span className="text-sm">종합점수</span><p className="text-3xl font-bold">{c.totalScore||"-"}</p></div>
+                  {c.comment&&<div className="mt-2 bg-white rounded p-2"><p className="text-xs text-gray-500">개선사항/육성계획</p><p className="text-xs text-gray-700">{c.comment}</p></div>}
+                </div>);})()}
+              
+              {/* 2차 평가 입력 */}
+              <div className="border-2 border-primary rounded-lg p-4">
+                <h3 className="font-bold text-primary mb-3">2차 평가 (등급 부여)</h3>
+                <div className="flex items-center space-x-4">
+                  <div className="flex-1"><p className="text-sm text-gray-600 mb-2">최종등급</p><div className="flex space-x-2">{["상","중","하"].map(g=>(<button key={g} onClick={()=>{setSecondDetailGrade(secondDetailGrade===g?"":g);setGrades({...grades,[secondDetailEmp.id]:secondDetailGrade===g?"":g});}} className={`w-12 h-12 rounded-lg font-bold text-lg transition ${secondDetailGrade===g?(g==="상"?"bg-green-500 text-white":g==="중"?"bg-yellow-500 text-white":"bg-red-500 text-white"):"bg-gray-100 text-gray-500 hover:bg-gray-200"}`}>{g}</button>))}</div></div>
+                  <div><p className="text-sm text-gray-600 mb-2">조정요청</p><select value={adjustRequest[secondDetailEmp.id]||""} onChange={e=>setAdjustRequest({...adjustRequest,[secondDetailEmp.id]:e.target.value})} className="border border-gray-300 rounded-lg px-3 py-2 text-sm"><option value="">-</option><option value="S추천">S추천</option><option value="A추천">A추천</option><option value="D부여">D부여</option></select></div>
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end space-x-3 p-6 border-t sticky bottom-0 bg-white rounded-b-xl"><button onClick={()=>setSecondDetailEmp(null)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm">닫기</button><button onClick={()=>{handleSaveGrades();setSecondDetailEmp(null);}} disabled={saving} className="flex items-center space-x-2 px-6 py-2 bg-secondary text-white rounded-lg text-sm disabled:opacity-50"><Save size={14}/><span>저장</span></button></div>
+          </div>
+        </div>
+      )}
 
       {/* Detail Modal */}
       {detailEmp && (
