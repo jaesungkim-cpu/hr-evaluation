@@ -5,134 +5,442 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { Employee } from "@/lib/types";
 import Link from "next/link";
-import { ArrowLeft, Save, User, Users, Star, AlertTriangle, CheckCircle } from "lucide-react";
+import { ArrowLeft, Save, Send, X, ChevronDown, FileText, AlertCircle, CheckCircle, Clock } from "lucide-react";
 
-type EmployeeExt = Employee & { division?: string | null };
-const SCORE_LABELS = ["","전혀 아니다","매우 그렇지 않다","그렇지 않다","보통이다","그렇다","대체로 그렇다","매우 그렇다"];
-const PERF_ITEMS = [{key:"delivery",label:"납기",weight:35,question:"요청한 일정을 준수하였나요?"},{key:"quality",label:"품질",weight:35,question:"결과물이 회사의 기대치에 부합하였나요?"},{key:"efficiency",label:"효율",weight:30,question:"성과 달성을 위해 투입한 인원, 비용, 시간 등은 효율적이었나요?"}];
-const COMP_ITEMS = [{key:"leadership",label:"리더십",weight:35,question:"조직의 명확한 방향과 목표를 인지하여 문제 상황에서 책임 회피 없이 결과를 끝까지 이끌고 있나요?"},{key:"growth",label:"성장지향성",weight:35,question:"실패 혹은 장애상황 발생 시 한계를 인식하고 피드백을 수용하여 개선 의지를 가지고 행동에 옮기고 있나요?"},{key:"ethics",label:"윤리의식",weight:30,question:"조직의 규정과 절차를 일관되게 준수하고 있나요? (지각, 무단결근 등의 발생 없음 포함)"}];
+type Emp = Employee & { division?: string | null };
+const PERF = [{k:"delivery",l:"납기",w:35},{k:"quality",l:"품질",w:35},{k:"efficiency",l:"효율",w:30}];
+const COMP = [{k:"leadership",l:"리더십",w:35},{k:"growth",l:"성장지향성",w:35},{k:"ethics",l:"윤리의식",w:30}];
+const calcScore = (items: {k:string,w:number}[], scores: Record<string,number>) => items.reduce((s,i)=>s+(scores[i.k]||0)*i.w,0)/7;
 
-export default function EvaluateDirectPage() {
+export default function EvaluatePage() {
   const router = useRouter();
-  const [user, setUser] = useState<EmployeeExt|null>(null);
-  const [employees, setEmployees] = useState<EmployeeExt[]>([]);
+  const [user, setUser] = useState<Emp|null>(null);
+  const [employees, setEmployees] = useState<Emp[]>([]);
   const [loading, setLoading] = useState(true);
-  const [evalMode, setEvalMode] = useState<'first'|'second'>('first');
-  const [selectedEvaluatee, setSelectedEvaluatee] = useState('');
-  const [achievements, setAchievements] = useState<string[]>(['','','']);
-  const [perfScores, setPerfScores] = useState<Record<string,number>>({delivery:4,quality:4,efficiency:4});
-  const [compScores, setCompScores] = useState<Record<string,number>>({leadership:4,growth:4,ethics:4});
-  const [comment, setComment] = useState('');
-  const [grades, setGrades] = useState<Record<string,string>>({});
-  const [existingEvals, setExistingEvals] = useState<any[]>([]);
+  const [evals, setEvals] = useState<any[]>([]);
+  // Left panel
+  const [selectedOrg, setSelectedOrg] = useState("");
+  const [selectedRole, setSelectedRole] = useState("");
+  // Inline editing scores
+  const [scores, setScores] = useState<Record<string,Record<string,number>>>({});
+  // Detail modal
+  const [detailEmp, setDetailEmp] = useState<Emp|null>(null);
+  const [detailAchievements, setDetailAchievements] = useState<string[]>(["","",""]);
+  const [detailScores, setDetailScores] = useState<Record<string,number>>({delivery:4,quality:4,efficiency:4,leadership:4,growth:4,ethics:4});
+  const [detailComment, setDetailComment] = useState("");
+  // Self eval
+  const [selfAchievements, setSelfAchievements] = useState<string[]>(["","",""]);
+  // Status
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [submitStatus, setSubmitStatus] = useState<"draft"|"submitted">("draft");
+  // 2nd eval grades
+  const [grades, setGrades] = useState<Record<string,string>>({});
 
   useEffect(()=>{loadData();},[]);
   const loadData = async () => {
     try {
-      const sid=document.cookie.split('; ').find((r)=>r.startsWith('session_id='))?.split('=')[1];
-      if(!sid){router.push('/');return;}
-      const{data:ud}=await supabase.from('employees').select('*').eq('id',sid).single();
-      if(!ud){router.push('/');return;}
+      const sid = document.cookie.split("; ").find(r=>r.startsWith("session_id="))?.split("=")[1];
+      if (!sid) { router.push("/"); return; }
+      const { data: ud } = await supabase.from("employees").select("*").eq("id", sid).single();
+      if (!ud) { router.push("/"); return; }
       setUser(ud);
-      if(ud.role==='second_evaluator'||ud.role==='ceo') setEvalMode('second');
-      const{data:emps}=await supabase.from('employees').select('*').order('name');
-      if(emps) setEmployees(emps);
-      const{data:evals}=await supabase.from('self_assessments').select('*');
-      if(evals) setExistingEvals(evals);
-    } catch(e){console.error(e);} finally{setLoading(false);}
+      const { data: emps } = await supabase.from("employees").select("*").order("name");
+      if (emps) setEmployees(emps);
+      const { data: ev } = await supabase.from("self_assessments").select("*");
+      if (ev) setEvals(ev);
+      // Set default role
+      if (ud.role === "first_evaluator") setSelectedRole("first");
+      else if (ud.role === "second_evaluator") setSelectedRole("second");
+      else if (ud.role === "admin") setSelectedRole("first");
+      else if (ud.role === "ceo") setSelectedRole("ceo");
+      // Set default org
+      if (ud.department) setSelectedOrg(ud.department + (ud.team ? "/" + ud.team : ""));
+    } catch(e) { console.error(e); } finally { setLoading(false); }
   };
-  const myEvaluatees = useMemo(()=>{
-    if(!user) return [];
-    if(user.role==='admin') return employees.filter((e)=>e.is_evaluated);
-    if(user.role==='first_evaluator') return employees.filter((e)=>e.first_evaluator_id===user.id||(e.department===user.department&&e.team===user.team&&e.id!==user.id&&e.title==='팀원'));
-    return employees.filter((e)=>e.is_evaluated);
-  },[user,employees]);
-  const deptEvaluatees = useMemo(()=>{
-    if(!user) return [];
-    if(user.role==='admin'||user.role==='ceo') return employees.filter((e)=>e.is_evaluated);
-    return employees.filter((e)=>e.department===user.department&&e.is_evaluated);
-  },[user,employees]);
-  const calcPerfScore=()=>PERF_ITEMS.reduce((s,i)=>s+(perfScores[i.key]||0)*i.weight,0)/7;
-  const calcCompScore=()=>COMP_ITEMS.reduce((s,i)=>s+(compScores[i.key]||0)*i.weight,0)/7;
-  const calcTotal=()=>Math.round((calcPerfScore()*0.7+calcCompScore()*0.3)*100)/100;
 
-  const handleSaveFirst = async () => {
-    if(!selectedEvaluatee){alert('피평가자를 선택해주세요');return;}
-    if(achievements.filter((a)=>a.trim()).length===0){alert('주요성과를 1건 이상 입력해주세요');return;}
-    if(comment.length<50){alert('개선사항/육성계획을 50자 이상 입력해주세요 (현재 '+comment.length+'자)');return;}
+  // Available roles for this user
+  const availableRoles = useMemo(() => {
+    if (!user) return [];
+    const roles: {value:string,label:string}[] = [];
+    if (["first_evaluator","admin"].includes(user.role)) {
+      roles.push({value:"self",label:"본인평가"});
+      roles.push({value:"first",label:"1차 평가자"});
+    }
+    if (user.role === "second_evaluator" || user.role === "admin") {
+      roles.push({value:"second",label:"2차 평가자"});
+    }
+    if (user.role === "ceo" || user.role === "admin") {
+      roles.push({value:"ceo",label:"CEO (최종승인)"});
+    }
+    return roles;
+  }, [user]);
+
+  // Available orgs
+  const availableOrgs = useMemo(() => {
+    if (!user) return [];
+    if (user.role === "admin" || user.role === "ceo") {
+      const depts = [...new Set(employees.map(e=>e.department).filter(Boolean))];
+      return depts.map(d=>({value:d!,label:d!}));
+    }
+    const orgs: {value:string,label:string}[] = [];
+    if (user.department) orgs.push({value:user.department,label:user.department});
+    if (user.team) orgs.push({value:user.department+"/"+user.team,label:user.team});
+    return orgs;
+  }, [user, employees]);
+
+  // Filtered evaluatees based on role + org
+  const evaluatees = useMemo(() => {
+    if (!user) return [];
+    let list = employees.filter(e => e.is_evaluated);
+    if (selectedRole === "self") return [user];
+    if (selectedRole === "first") {
+      if (user.role === "admin") {
+        if (selectedOrg) list = list.filter(e => e.department === selectedOrg || (e.department+"/"+e.team) === selectedOrg);
+      } else {
+        list = list.filter(e => e.first_evaluator_id === user.id || (e.department === user.department && e.team === user.team && e.id !== user.id));
+      }
+    }
+    if (selectedRole === "second") {
+      if (user.role === "admin") {
+        if (selectedOrg) list = list.filter(e => e.department === selectedOrg);
+      } else {
+        list = list.filter(e => e.department === user.department);
+      }
+    }
+    if (selectedRole === "ceo") {
+      if (selectedOrg) list = list.filter(e => e.department === selectedOrg);
+    }
+    return list;
+  }, [user, employees, selectedRole, selectedOrg]);
+
+  // Stats
+  const stats = useMemo(() => {
+    const total = evaluatees.length;
+    const target = evaluatees.filter(e=>e.is_evaluated).length;
+    const completed = evaluatees.filter(e => {
+      const ft = selectedRole === "first" ? "evaluation_opinion" : "department_evaluation";
+      return evals.some(ev => ev.employee_id === e.id && ev.content_json?.fileType === ft);
+    }).length;
+    const avgScore = evaluatees.reduce((sum, e) => {
+      const ev = evals.find(ev => ev.employee_id === e.id && ev.content_json?.fileType === "evaluation_opinion");
+      return sum + (ev?.content_json?.totalScore || 0);
+    }, 0) / (completed || 1);
+    return { total, target, completed, avgScore: Math.round(avgScore*10)/10, status: completed === 0 ? "미진행" : completed >= target ? "제출완료" : "진행 중" };
+  }, [evaluatees, evals, selectedRole]);
+
+  // Get employee's eval data
+  const getEval = (empId: string, type: string) => evals.find(e => e.employee_id === empId && e.content_json?.fileType === type);
+  const getSelfEval = (empId: string) => getEval(empId, "self_assessment");
+  const getFirstEval = (empId: string) => getEval(empId, "evaluation_opinion");
+
+  // Score handlers for inline table
+  const setInlineScore = (empId: string, key: string, val: number) => {
+    setScores(prev => ({...prev, [empId]: {...(prev[empId]||{delivery:4,quality:4,efficiency:4,leadership:4,growth:4,ethics:4}), [key]: val}}));
+  };
+  const getInlineScores = (empId: string) => {
+    const existing = getFirstEval(empId);
+    if (scores[empId]) return scores[empId];
+    if (existing?.content_json?.scores) return existing.content_json.scores;
+    return {delivery:4,quality:4,efficiency:4,leadership:4,growth:4,ethics:4};
+  };
+  const getInlineTotal = (empId: string) => {
+    const s = getInlineScores(empId);
+    const perf = calcScore(PERF, s);
+    const comp = calcScore(COMP, s);
+    return Math.round((perf * 0.7 + comp * 0.3) * 100) / 100;
+  };
+
+  // Save all inline scores
+  const handleSaveAll = async () => {
     setSaving(true);
     try {
-      const ev=employees.find((e)=>e.id===selectedEvaluatee);
-      const{error}=await supabase.from('self_assessments').insert({employee_id:selectedEvaluatee,content_json:{fileType:'evaluation_opinion',evaluator:{name:user?.name,department:user?.department,team:user?.team,type:'1차평가자'},achievements:achievements.filter((a)=>a.trim()),scores:{...perfScores,...compScores},perfScore:Math.round(calcPerfScore()*100)/100,compScore:Math.round(calcCompScore()*100)/100,totalScore:calcTotal(),comment,registeredVia:'web_app'},uploaded_at:new Date().toISOString()});
-      if(error) throw error;
-      setSaved(true);alert(`${ev?.name}님의 1차 평가가 등록되었습니다. (종합: ${calcTotal()}점)`);
-    } catch(e){console.error(e);alert('저장 중 오류가 발생했습니다');} finally{setSaving(false);}
+      const entries = Object.entries(scores);
+      if (entries.length === 0) { alert("변경된 점수가 없습니다"); setSaving(false); return; }
+      for (const [empId, sc] of entries) {
+        const perf = calcScore(PERF, sc);
+        const comp = calcScore(COMP, sc);
+        const total = Math.round((perf * 0.7 + comp * 0.3) * 100) / 100;
+        const data = { fileType: "evaluation_opinion", evaluator: {name:user?.name,department:user?.department,type:selectedRole==="first"?"1차평가자":"2차평가자"}, scores: sc, perfScore: Math.round(perf*100)/100, compScore: Math.round(comp*100)/100, totalScore: total, registeredVia: "web_app" };
+        const existing = getFirstEval(empId);
+        if (existing) {
+          await supabase.from("self_assessments").update({content_json: data}).eq("id", existing.id);
+        } else {
+          await supabase.from("self_assessments").insert({employee_id: empId, content_json: data, uploaded_at: new Date().toISOString()});
+        }
+      }
+      alert(`${entries.length}명의 평가 점수가 저장되었습니다.`);
+      await loadData();
+    } catch(e) { console.error(e); alert("저장 중 오류"); } finally { setSaving(false); }
   };
-  const handleSaveSecond = async () => {
-    const entries=Object.entries(grades).filter(([,v])=>v);
-    if(entries.length===0){alert('최소 1명 이상 등급을 부여해주세요');return;}
+
+  // Submit (final)
+  const handleSubmit = async () => {
+    if (!confirm("제출완료 후에는 수정할 수 없습니다. 제출하시겠습니까?")) return;
+    await handleSaveAll();
+    setSubmitStatus("submitted");
+    alert("제출이 완료되었습니다.");
+  };
+
+  // Save self evaluation
+  const handleSaveSelf = async () => {
     setSaving(true);
     try {
-      const inserts=entries.map(([empId,grade])=>({employee_id:empId,content_json:{fileType:'department_evaluation',deptName:user?.department,finalGrade:grade,evaluator:user?.name,registeredVia:'web_app'},uploaded_at:new Date().toISOString()}));
-      const{error}=await supabase.from('self_assessments').insert(inserts);
-      if(error) throw error;
-      setSaved(true);alert(`${entries.length}명의 2차 평가 등급이 등록되었습니다.`);
-    } catch(e){console.error(e);alert('저장 중 오류가 발생했습니다');} finally{setSaving(false);}
+      const data = { fileType: "self_assessment", achievements: selfAchievements.filter(a=>a.trim()), registeredVia: "web_app" };
+      const existing = getSelfEval(user!.id);
+      if (existing) {
+        await supabase.from("self_assessments").update({content_json: data}).eq("id", existing.id);
+      } else {
+        await supabase.from("self_assessments").insert({employee_id: user!.id, content_json: data, uploaded_at: new Date().toISOString()});
+      }
+      alert("본인평가가 저장되었습니다.");
+      await loadData();
+    } catch(e) { console.error(e); alert("저장 중 오류"); } finally { setSaving(false); }
   };
-  const gradeStats = useMemo(()=>{
-    const l=deptEvaluatees.filter((e)=>e.group_type==='팀장급');const m=deptEvaluatees.filter((e)=>e.group_type==='팀원');
-    const cnt=(list:EmployeeExt[],g:string)=>list.filter((e)=>grades[e.id]===g).length;
+
+  // Save detail modal
+  const handleSaveDetail = async () => {
+    if (!detailEmp) return;
+    setSaving(true);
+    try {
+      const perf = calcScore(PERF, detailScores);
+      const comp = calcScore(COMP, detailScores);
+      const total = Math.round((perf*0.7+comp*0.3)*100)/100;
+      const data = { fileType: "evaluation_opinion", evaluator: {name:user?.name,department:user?.department,type:"1차평가자"}, achievements: detailAchievements.filter(a=>a.trim()), scores: detailScores, perfScore: Math.round(perf*100)/100, compScore: Math.round(comp*100)/100, totalScore: total, comment: detailComment, registeredVia: "web_app" };
+      const existing = getFirstEval(detailEmp.id);
+      if (existing) {
+        await supabase.from("self_assessments").update({content_json: data}).eq("id", existing.id);
+      } else {
+        await supabase.from("self_assessments").insert({employee_id: detailEmp.id, content_json: data, uploaded_at: new Date().toISOString()});
+      }
+      alert(`${detailEmp.name}님의 평가가 저장되었습니다.`);
+      setDetailEmp(null);
+      await loadData();
+    } catch(e) { console.error(e); alert("저장 중 오류"); } finally { setSaving(false); }
+  };
+
+  // Open detail modal
+  const openDetail = (emp: Emp) => {
+    const ev = getFirstEval(emp.id);
+    setDetailEmp(emp);
+    if (ev?.content_json) {
+      setDetailAchievements(ev.content_json.achievements?.length > 0 ? ev.content_json.achievements : ["","",""]);
+      setDetailScores(ev.content_json.scores || {delivery:4,quality:4,efficiency:4,leadership:4,growth:4,ethics:4});
+      setDetailComment(ev.content_json.comment || "");
+    } else {
+      setDetailAchievements(["","",""]);
+      setDetailScores({delivery:4,quality:4,efficiency:4,leadership:4,growth:4,ethics:4});
+      setDetailComment("");
+    }
+    // Load self assessment achievements if available
+    const selfEv = getSelfEval(emp.id);
+    if (selfEv?.content_json?.achievements && !ev) {
+      setDetailAchievements(selfEv.content_json.achievements.length >= 3 ? selfEv.content_json.achievements : [...selfEv.content_json.achievements, ...Array(3-selfEv.content_json.achievements.length).fill("")]);
+    }
+  };
+
+  // 2nd eval: save grades
+  const handleSaveGrades = async () => {
+    const entries = Object.entries(grades).filter(([,v])=>v);
+    if (entries.length === 0) { alert("등급을 부여해주세요"); return; }
+    setSaving(true);
+    try {
+      for (const [empId, grade] of entries) {
+        const existing = getEval(empId, "department_evaluation");
+        const data = { fileType: "department_evaluation", deptName: user?.department, finalGrade: grade, evaluator: user?.name, registeredVia: "web_app" };
+        if (existing) {
+          await supabase.from("self_assessments").update({content_json: data}).eq("id", existing.id);
+        } else {
+          await supabase.from("self_assessments").insert({employee_id: empId, content_json: data, uploaded_at: new Date().toISOString()});
+        }
+      }
+      alert(`${entries.length}명의 등급이 저장되었습니다.`);
+      await loadData();
+    } catch(e) { console.error(e); alert("저장 중 오류"); } finally { setSaving(false); }
+  };
+
+  // Grade stats for 2nd eval
+  const gradeStats = useMemo(() => {
+    const l = evaluatees.filter(e=>e.group_type==="팀장급");
+    const m = evaluatees.filter(e=>e.group_type==="팀원");
+    const cnt = (list:Emp[],g:string) => list.filter(e=>(grades[e.id]||(getEval(e.id,"department_evaluation")?.content_json?.finalGrade))=== g).length;
     return {
-      leaders:{total:l.length,상:{target:Math.round(l.length*0.3),assigned:cnt(l,'상')},중:{target:Math.round(l.length*0.4),assigned:cnt(l,'중')},하:{target:Math.round(l.length*0.3),assigned:cnt(l,'하')}},
-      members:{total:m.length,상:{target:Math.round(m.length*0.3),assigned:cnt(m,'상')},중:{target:Math.round(m.length*0.4),assigned:cnt(m,'중')},하:{target:Math.round(m.length*0.3),assigned:cnt(m,'하')}},
+      leaders:{total:l.length,상:{t:Math.round(l.length*0.3),a:cnt(l,"상")},중:{t:Math.round(l.length*0.4),a:cnt(l,"중")},하:{t:Math.round(l.length*0.3),a:cnt(l,"하")}},
+      members:{total:m.length,상:{t:Math.round(m.length*0.3),a:cnt(m,"상")},중:{t:Math.round(m.length*0.4),a:cnt(m,"중")},하:{t:Math.round(m.length*0.3),a:cnt(m,"하")}},
     };
-  },[deptEvaluatees,grades]);
+  }, [evaluatees, grades, evals]);
 
-  if(loading) return <div className="flex items-center justify-center min-h-screen"><div className="spinner mx-auto mb-4"></div><p className="text-gray-600">로딩 중...</p></div>;
-  if(!user) return <div className="flex items-center justify-center min-h-screen"><p className="text-gray-600">로그인이 필요합니다</p></div>;
+  if (loading) return <div className="flex items-center justify-center min-h-screen"><div className="spinner mx-auto mb-4"></div><p className="text-gray-600">로딩 중...</p></div>;
+  if (!user) return <div className="flex items-center justify-center min-h-screen"><p className="text-gray-600">로그인이 필요합니다</p></div>;
 
   return (
-    <div className="container mx-auto py-8">
-      <div className="flex items-center space-x-4 mb-6"><Link href="/dashboard" className="flex items-center space-x-2 text-secondary hover:text-primary transition"><ArrowLeft size={20}/><span>돌아가기</span></Link></div>
-      <div className="mb-8 flex items-center justify-between">
-        <div><h1 className="text-3xl font-bold text-primary mb-2">평가 등록</h1><p className="text-gray-600">구성원 평가를 직접 등록합니다</p></div>
-        {(user.role==='admin'||user.role==='second_evaluator'||user.role==='ceo')&&(
-          <div className="flex bg-light rounded-lg p-1"><button onClick={()=>{setEvalMode('first');setSaved(false);}} className={`px-4 py-2 rounded font-medium transition ${evalMode==='first'?'bg-white text-primary shadow':'text-gray-600'}`}><User size={16} className="inline mr-1"/>1차 평가</button><button onClick={()=>{setEvalMode('second');setSaved(false);}} className={`px-4 py-2 rounded font-medium transition ${evalMode==='second'?'bg-white text-primary shadow':'text-gray-600'}`}><Users size={16} className="inline mr-1"/>2차 평가</button></div>
-        )}
+    <div className="min-h-screen bg-light">
+      <div className="container mx-auto py-6">
+        <div className="flex items-center space-x-4 mb-4"><Link href="/dashboard" className="flex items-center space-x-2 text-secondary hover:text-primary transition"><ArrowLeft size={20}/><span>대시보드</span></Link></div>
+
+        <div className="flex gap-6">
+          {/* Left Panel */}
+          <div className="w-64 flex-shrink-0">
+            <div className="bg-white rounded-lg shadow p-4 mb-4">
+              <h3 className="text-sm font-bold text-gray-500 uppercase mb-3">대상조직</h3>
+              <select value={selectedOrg} onChange={e=>setSelectedOrg(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-secondary focus:outline-none">
+                {availableOrgs.map(o=>(<option key={o.value} value={o.value}>{o.label}</option>))}
+              </select>
+            </div>
+            <div className="bg-white rounded-lg shadow p-4">
+              <h3 className="text-sm font-bold text-gray-500 uppercase mb-3">평가권한</h3>
+              <div className="space-y-2">
+                {availableRoles.map(r=>(<button key={r.value} onClick={()=>setSelectedRole(r.value)} className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition ${selectedRole===r.value?"bg-secondary text-white":"bg-light text-gray-700 hover:bg-gray-200"}`}>{r.label}</button>))}
+              </div>
+            </div>
+          </div>
+
+          {/* Main Content */}
+          <div className="flex-1">
+            <h1 className="text-2xl font-bold text-primary mb-4">{selectedRole==="self"?"본인평가":selectedRole==="first"?"1차 평가자 화면":selectedRole==="second"?"2차 평가자 화면":"CEO 최종승인"}</h1>
+
+            {/* Stats Bar */}
+            <div className="bg-white rounded-lg shadow p-4 mb-4">
+              <h3 className="text-sm font-bold text-gray-500 mb-3">평가진행 현황</h3>
+              <div className="grid grid-cols-6 gap-4 text-center text-sm">
+                <div><p className="text-gray-500">전체인원</p><p className="text-2xl font-bold text-primary">{selectedRole==="self"?"-":stats.total}</p></div>
+                <div><p className="text-gray-500">평가대상</p><p className="text-2xl font-bold text-primary">{selectedRole==="self"?"-":stats.target}</p></div>
+                <div><p className="text-gray-500">등록완료</p><p className="text-2xl font-bold text-green-600">{selectedRole==="self"?"-":stats.completed}</p></div>
+                <div><p className="text-gray-500">평균점수</p><p className="text-2xl font-bold text-secondary">{selectedRole==="self"?"-":stats.avgScore}</p></div>
+                <div><p className="text-gray-500">진행상태</p><p className={`text-lg font-bold ${stats.status==="제출완료"?"text-green-600":stats.status==="진행 중"?"text-yellow-600":"text-gray-400"}`}>{selectedRole==="self"?"-":stats.status}</p></div>
+                <div><p className="text-gray-500">제출마감</p><p className="text-lg font-bold text-red-500">-</p></div>
+              </div>
+            </div>
+
+            {/* Self Evaluation */}
+            {selectedRole === "self" && (
+              <div className="bg-white rounded-lg shadow p-6">
+                <h2 className="text-lg font-bold text-primary mb-4">주요 성과</h2>
+                <p className="text-sm text-gray-500 mb-4">본인의 주요성과를 기재해주세요 (최소 1건)</p>
+                {selfAchievements.map((a,i)=>(<div key={i} className="mb-4"><label className="block text-sm font-medium text-gray-700 mb-1">성과 {i+1}</label><textarea value={a} onChange={e=>{const n=[...selfAchievements];n[i]=e.target.value;setSelfAchievements(n);}} rows={3} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-secondary focus:outline-none" placeholder="성과 내용을 입력하세요..."/></div>))}
+                <button onClick={()=>setSelfAchievements([...selfAchievements,""])} className="text-secondary text-sm font-medium mb-4">+ 성과 추가</button>
+                <div className="flex space-x-3 mt-4">
+                  <button onClick={handleSaveSelf} disabled={saving} className="flex items-center space-x-2 px-6 py-2 bg-secondary text-white rounded-lg hover:bg-opacity-90 disabled:opacity-50"><Save size={16}/><span>등록저장</span></button>
+                  <button onClick={()=>{handleSaveSelf();setSubmitStatus("submitted");}} className="flex items-center space-x-2 px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-opacity-90"><Send size={16}/><span>제출완료</span></button>
+                </div>
+              </div>
+            )}
+
+            {/* 1st Evaluator Table */}
+            {selectedRole === "first" && (
+              <div className="bg-white rounded-lg shadow">
+                <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+                  <h2 className="text-lg font-bold text-primary">평가등록 현황</h2>
+                  <div className="flex space-x-3">
+                    <button onClick={handleSaveAll} disabled={saving} className="flex items-center space-x-2 px-4 py-2 bg-secondary text-white rounded-lg text-sm hover:bg-opacity-90 disabled:opacity-50"><Save size={14}/><span>등록저장</span></button>
+                    <button onClick={handleSubmit} className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-opacity-90"><Send size={14}/><span>제출완료</span></button>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-light">
+                      <tr>
+                        <th colSpan={6} className="px-2 py-2 text-center border-b border-r font-bold text-primary">평가대상자 정보</th>
+                        <th className="px-2 py-2 text-center border-b border-r font-bold text-blue-600">본인평가</th>
+                        <th colSpan={4} className="px-2 py-2 text-center border-b border-r font-bold text-primary">성과평가 (70%)</th>
+                        <th colSpan={4} className="px-2 py-2 text-center border-b border-r font-bold text-primary">역량평가 (30%)</th>
+                        <th className="px-2 py-2 text-center border-b border-r font-bold text-secondary">종합</th>
+                        <th className="px-2 py-2 text-center border-b font-bold text-gray-600">순위</th>
+                      </tr>
+                      <tr className="bg-gray-50">
+                        <th className="px-2 py-1 text-left border-b">본부</th><th className="px-2 py-1 text-left border-b">실</th><th className="px-2 py-1 text-left border-b">팀</th>
+                        <th className="px-2 py-1 text-left border-b">성명</th><th className="px-2 py-1 text-center border-b">그룹</th><th className="px-2 py-1 text-center border-b border-r">입사일</th>
+                        <th className="px-2 py-1 text-center border-b border-r">등록</th>
+                        <th className="px-2 py-1 text-center border-b">납기</th><th className="px-2 py-1 text-center border-b">품질</th><th className="px-2 py-1 text-center border-b">효율</th><th className="px-2 py-1 text-center border-b border-r">합계</th>
+                        <th className="px-2 py-1 text-center border-b">리더십</th><th className="px-2 py-1 text-center border-b">성장</th><th className="px-2 py-1 text-center border-b">윤리</th><th className="px-2 py-1 text-center border-b border-r">합계</th>
+                        <th className="px-2 py-1 text-center border-b border-r">점수</th>
+                        <th className="px-2 py-1 text-center border-b">순위</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {evaluatees.map((emp, idx) => {
+                        const s = getInlineScores(emp.id);
+                        const perfTotal = Math.round(calcScore(PERF, s)*100)/100;
+                        const compTotal = Math.round(calcScore(COMP, s)*100)/100;
+                        const total = getInlineTotal(emp.id);
+                        const selfEv = getSelfEval(emp.id);
+                        const sortedTotals = evaluatees.map(e=>getInlineTotal(e.id)).sort((a,b)=>b-a);
+                        const rank = sortedTotals.indexOf(total) + 1;
+                        return (
+                          <tr key={emp.id} className="border-b border-gray-100 hover:bg-blue-50">
+                            <td className="px-2 py-2 text-xs">{emp.department}</td>
+                            <td className="px-2 py-2 text-xs">{(emp as any).division||"-"}</td>
+                            <td className="px-2 py-2 text-xs">{emp.team}</td>
+                            <td className="px-2 py-2"><button onClick={()=>openDetail(emp)} className="text-secondary hover:text-primary font-bold underline">{emp.name}</button></td>
+                            <td className="px-2 py-2 text-center"><span className={`px-1 py-0.5 rounded text-xs ${emp.group_type==="팀장급"?"bg-purple-100 text-purple-700":"bg-blue-100 text-blue-700"}`}>{emp.group_type}</span></td>
+                            <td className="px-2 py-2 text-center border-r text-xs text-gray-500">{emp.created_at?.slice(0,7)}</td>
+                            <td className="px-2 py-2 text-center border-r">{selfEv?<span className="text-green-600 font-bold text-xs">등록완료</span>:<span className="text-red-500 text-xs">미등록</span>}</td>
+                            {PERF.map(p=>(<td key={p.k} className="px-1 py-1 text-center"><select value={s[p.k]||4} onChange={e=>setInlineScore(emp.id,p.k,Number(e.target.value))} className="w-12 text-center text-xs border border-gray-300 rounded py-1">{[1,2,3,4,5,6,7].map(v=>(<option key={v} value={v}>{v}</option>))}</select></td>))}
+                            <td className="px-2 py-2 text-center border-r font-bold text-xs">{perfTotal}</td>
+                            {COMP.map(p=>(<td key={p.k} className="px-1 py-1 text-center"><select value={s[p.k]||4} onChange={e=>setInlineScore(emp.id,p.k,Number(e.target.value))} className="w-12 text-center text-xs border border-gray-300 rounded py-1">{[1,2,3,4,5,6,7].map(v=>(<option key={v} value={v}>{v}</option>))}</select></td>))}
+                            <td className="px-2 py-2 text-center border-r font-bold text-xs">{compTotal}</td>
+                            <td className="px-2 py-2 text-center border-r font-bold text-secondary">{total}</td>
+                            <td className="px-2 py-2 text-center text-xs text-gray-600">{rank}/{evaluatees.length}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* 2nd Evaluator */}
+            {(selectedRole === "second" || selectedRole === "ceo") && (
+              <div className="space-y-4">
+                <div className="bg-white rounded-lg shadow p-4">
+                  <h3 className="text-sm font-bold text-gray-500 mb-3">상대평가 비율</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    {(["leaders","members"] as const).map(g=>(<div key={g} className="border rounded-lg p-3"><h4 className="font-bold text-primary text-sm mb-2">{g==="leaders"?"팀장이상":"팀원"} ({gradeStats[g].total}명)</h4><table className="w-full text-xs"><thead><tr className="border-b"><th className="text-left py-1">등급</th><th className="text-center py-1">비율</th><th className="text-center py-1">기준</th><th className="text-center py-1">부여</th><th className="text-center py-1">차이</th></tr></thead><tbody>{(["상","중","하"] as const).map(gr=>{const s=gradeStats[g][gr];const d=s.t-s.a;return(<tr key={gr} className="border-b"><td className={`py-1 font-bold ${gr==="상"?"text-green-600":gr==="중"?"text-yellow-600":"text-red-600"}`}>{gr}</td><td className="text-center">{gr==="상"?"30%":gr==="중"?"40%":"30%"}</td><td className="text-center">{s.t}명</td><td className="text-center font-bold">{s.a}명</td><td className={`text-center font-bold ${d===0?"text-green-600":d>0?"text-blue-600":"text-red-600"}`}>{d>0?"+"+d:d}</td></tr>);})}</tbody></table></div>))}
+                  </div>
+                </div>
+                <div className="bg-white rounded-lg shadow">
+                  <div className="p-4 border-b flex justify-between items-center"><h2 className="text-lg font-bold text-primary">등급 부여</h2><div className="flex space-x-3"><button onClick={handleSaveGrades} disabled={saving} className="flex items-center space-x-2 px-4 py-2 bg-secondary text-white rounded-lg text-sm disabled:opacity-50"><Save size={14}/><span>등록저장</span></button><button onClick={()=>{handleSaveGrades();setSubmitStatus("submitted");}} className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg text-sm"><Send size={14}/><span>제출완료</span></button></div></div>
+                  <div className="overflow-x-auto"><table className="w-full text-xs"><thead className="bg-light"><tr><th className="text-left px-3 py-2">성명</th><th className="text-left px-3 py-2">팀</th><th className="text-center px-3 py-2">직책분류</th><th className="text-center px-3 py-2">1차평가</th><th className="text-center px-3 py-2">팀평균</th><th className="text-center px-3 py-2">본부평균</th><th className="text-center px-3 py-2">조정점수</th><th className="text-center px-3 py-2">권장등급</th><th className="text-center px-3 py-2">최종등급</th><th className="text-center px-3 py-2">비고</th></tr></thead>
+                    <tbody>{evaluatees.map(emp=>{
+                      const ev = getFirstEval(emp.id);
+                      const ts = ev?.content_json?.totalScore || 0;
+                      const deptAvg = evaluatees.filter(e=>e.group_type===emp.group_type).reduce((s,e)=>{const v=getFirstEval(e.id);return s+(v?.content_json?.totalScore||0);},0)/(evaluatees.filter(e=>e.group_type===emp.group_type).length||1);
+                      const existingGrade = getEval(emp.id,"department_evaluation")?.content_json?.finalGrade;
+                      const currentGrade = grades[emp.id] || existingGrade || "";
+                      return(<tr key={emp.id} className="border-b hover:bg-blue-50"><td className="px-3 py-2 font-medium">{emp.name}</td><td className="px-3 py-2 text-gray-600">{emp.team}</td><td className="px-3 py-2 text-center"><span className={`px-1.5 py-0.5 rounded text-xs font-bold ${emp.group_type==="팀장급"?"bg-purple-100 text-purple-700":"bg-blue-100 text-blue-700"}`}>{emp.group_type}</span></td><td className="px-3 py-2 text-center font-bold">{ts||"-"}</td><td className="px-3 py-2 text-center">{ts?Math.round(ts*10)/10:"-"}</td><td className="px-3 py-2 text-center">{Math.round(deptAvg*10)/10}</td><td className="px-3 py-2 text-center font-bold">{ts?Math.round(ts*(ts/(deptAvg||1))*10)/10:"-"}</td><td className="px-3 py-2 text-center">-</td><td className="px-3 py-2 text-center"><div className="flex justify-center space-x-1">{["상","중","하"].map(g=>(<button key={g} onClick={()=>setGrades({...grades,[emp.id]:currentGrade===g?"":g})} className={`w-8 h-8 rounded font-bold text-xs transition ${currentGrade===g?(g==="상"?"bg-green-500 text-white":g==="중"?"bg-yellow-500 text-white":"bg-red-500 text-white"):"bg-gray-100 text-gray-500 hover:bg-gray-200"}`}>{g}</button>))}</div></td><td className="px-3 py-2 text-center text-xs">-</td></tr>);
+                    })}</tbody></table></div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
-      {evalMode==='first'&&!saved&&(
-        <div className="space-y-6">
-          <div className="bg-white rounded-lg shadow p-6"><h2 className="text-lg font-bold text-primary mb-4">피평가자 선택</h2><select value={selectedEvaluatee} onChange={(e)=>setSelectedEvaluatee(e.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-secondary focus:outline-none text-lg"><option value="">-- 평가할 구성원을 선택하세요 --</option>{myEvaluatees.map((e)=>(<option key={e.id} value={e.id}>{e.name} ({e.department}/{e.team}) - {e.title}</option>))}</select></div>
+      {/* Detail Modal */}
+      {detailEmp && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={()=>setDetailEmp(null)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+            <div className="flex items-center justify-between p-6 border-b sticky top-0 bg-white rounded-t-xl"><h2 className="text-xl font-bold text-primary">{detailEmp.name} 개인별 평가</h2><button onClick={()=>setDetailEmp(null)} className="text-gray-400 hover:text-gray-600"><X size={24}/></button></div>
+            <div className="p-6 space-y-6">
+              <div className="grid grid-cols-4 gap-3 text-sm"><div className="bg-light p-2 rounded"><span className="text-gray-500">본부</span><p className="font-medium">{detailEmp.department}</p></div><div className="bg-light p-2 rounded"><span className="text-gray-500">팀</span><p className="font-medium">{detailEmp.team}</p></div><div className="bg-light p-2 rounded"><span className="text-gray-500">직책</span><p className="font-medium">{detailEmp.title}</p></div><div className="bg-light p-2 rounded"><span className="text-gray-500">그룹</span><p className="font-medium">{detailEmp.group_type}</p></div></div>
+              
+              {getSelfEval(detailEmp.id) && <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center justify-between"><div><p className="font-bold text-blue-700 text-sm">본인업적기술서 등록됨</p><p className="text-xs text-blue-600">{getSelfEval(detailEmp.id)?.content_json?.achievements?.length||0}건의 성과</p></div><button onClick={()=>{const sa=getSelfEval(detailEmp.id)?.content_json;if(sa?.achievements){const a=sa.achievements;setDetailAchievements(a.length>=3?a:[...a,...Array(3-a.length).fill("")]);}}} className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium">불러오기</button></div>}
 
-          {selectedEvaluatee&&(<>
-            {(()=>{const sa=existingEvals.find((e)=>e.employee_id===selectedEvaluatee&&e.content_json?.fileType==='self_assessment');if(!sa) return null;return(<div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4 flex items-center justify-between"><div><p className="font-bold text-blue-700">본인업적기술서가 등록되어 있습니다</p><p className="text-sm text-blue-600">{sa.content_json?.achievements?.length||0}건의 성과 기록</p></div><button onClick={()=>{const d=sa.content_json;if(d?.achievements){const a=d.achievements.length>0?d.achievements:[''];setAchievements(a.length>=3?a:[...a,...Array(3-a.length).fill('')]);}alert('본인업적기술서 내용을 불러왔습니다.');}} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium text-sm">성과 불러오기</button></div>);})()}
+              <div><h3 className="text-sm font-bold text-gray-500 mb-2">주요 성과</h3>{detailAchievements.map((a,i)=>(<div key={i} className="mb-3"><label className="text-xs font-medium text-gray-600">성과 {i+1}</label><textarea value={a} onChange={e=>{const n=[...detailAchievements];n[i]=e.target.value;setDetailAchievements(n);}} rows={2} className="w-full px-3 py-2 border border-gray-300 rounded text-sm"/></div>))}<button onClick={()=>setDetailAchievements([...detailAchievements,""])} className="text-secondary text-xs">+ 추가</button></div>
 
-            <div className="bg-white rounded-lg shadow p-6"><h2 className="text-lg font-bold text-primary mb-4">주요 성과</h2><p className="text-sm text-gray-500 mb-4">피평가자의 주요 성과를 기재해주세요 (최소 1건)</p>{achievements.map((a,i)=>(<div key={i} className="mb-4"><label className="block text-sm font-medium text-gray-700 mb-1">성과 {i+1}</label><textarea value={a} onChange={(e)=>{const n=[...achievements];n[i]=e.target.value;setAchievements(n);}} rows={3} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-secondary focus:outline-none" placeholder="성과 내용을 입력하세요..."/></div>))}<button onClick={()=>setAchievements([...achievements,''])} className="text-secondary hover:text-primary text-sm font-medium">+ 성과 추가</button></div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="border rounded-lg p-4"><h3 className="text-sm font-bold text-primary mb-3">성과평가 (70%)</h3>{PERF.map(p=>(<div key={p.k} className="flex items-center justify-between mb-2"><span className="text-sm">{p.l} ({p.w}%)</span><select value={detailScores[p.k]||4} onChange={e=>setDetailScores({...detailScores,[p.k]:Number(e.target.value)})} className="w-14 text-center border rounded py-1 text-sm">{[1,2,3,4,5,6,7].map(v=>(<option key={v} value={v}>{v}</option>))}</select></div>))}<div className="pt-2 border-t font-bold text-primary flex justify-between"><span>합계</span><span>{Math.round(calcScore(PERF,detailScores)*100)/100}</span></div></div>
+                <div className="border rounded-lg p-4"><h3 className="text-sm font-bold text-primary mb-3">역량평가 (30%)</h3>{COMP.map(p=>(<div key={p.k} className="flex items-center justify-between mb-2"><span className="text-sm">{p.l} ({p.w}%)</span><select value={detailScores[p.k]||4} onChange={e=>setDetailScores({...detailScores,[p.k]:Number(e.target.value)})} className="w-14 text-center border rounded py-1 text-sm">{[1,2,3,4,5,6,7].map(v=>(<option key={v} value={v}>{v}</option>))}</select></div>))}<div className="pt-2 border-t font-bold text-primary flex justify-between"><span>합계</span><span>{Math.round(calcScore(COMP,detailScores)*100)/100}</span></div></div>
+              </div>
 
-            <div className="bg-white rounded-lg shadow p-6"><div className="flex items-center justify-between mb-4"><h2 className="text-lg font-bold text-primary">성과평가 (70%)</h2><div className="text-2xl font-bold text-primary">{Math.round(calcPerfScore()*100)/100}점</div></div><p className="text-sm text-gray-500 mb-6">7점 척도 (1=전혀 아니다 ~ 7=매우 그렇다)</p>{PERF_ITEMS.map((item)=>(<div key={item.key} className="mb-6 p-4 bg-light rounded-lg"><div className="flex items-center justify-between mb-2"><span className="font-bold text-primary">{item.label} <span className="text-sm font-normal text-gray-500">({item.weight}%)</span></span><span className="text-lg font-bold text-secondary">{perfScores[item.key]}점</span></div><p className="text-sm text-gray-600 mb-3">{item.question}</p><div className="flex space-x-2">{[1,2,3,4,5,6,7].map((s)=>(<button key={s} onClick={()=>setPerfScores({...perfScores,[item.key]:s})} className={`w-10 h-10 rounded-full font-bold text-sm transition ${perfScores[item.key]===s?'bg-secondary text-white shadow-lg scale-110':'bg-white border-2 border-gray-300 text-gray-600 hover:border-secondary'}`}>{s}</button>))}</div><p className="text-xs text-gray-400 mt-1">{SCORE_LABELS[perfScores[item.key]]}</p></div>))}</div>
+              <div className="bg-primary text-white rounded-lg p-4 text-center"><span className="text-sm">종합점수</span><p className="text-4xl font-bold">{Math.round((calcScore(PERF,detailScores)*0.7+calcScore(COMP,detailScores)*0.3)*100)/100}</p></div>
 
-            <div className="bg-white rounded-lg shadow p-6"><div className="flex items-center justify-between mb-4"><h2 className="text-lg font-bold text-primary">역량평가 (30%)</h2><div className="text-2xl font-bold text-primary">{Math.round(calcCompScore()*100)/100}점</div></div><p className="text-sm text-gray-500 mb-6">7점 척도</p>{COMP_ITEMS.map((item)=>(<div key={item.key} className="mb-6 p-4 bg-light rounded-lg"><div className="flex items-center justify-between mb-2"><span className="font-bold text-primary">{item.label} <span className="text-sm font-normal text-gray-500">({item.weight}%)</span></span><span className="text-lg font-bold text-secondary">{compScores[item.key]}점</span></div><p className="text-sm text-gray-600 mb-3">{item.question}</p><div className="flex space-x-2">{[1,2,3,4,5,6,7].map((s)=>(<button key={s} onClick={()=>setCompScores({...compScores,[item.key]:s})} className={`w-10 h-10 rounded-full font-bold text-sm transition ${compScores[item.key]===s?'bg-secondary text-white shadow-lg scale-110':'bg-white border-2 border-gray-300 text-gray-600 hover:border-secondary'}`}>{s}</button>))}</div><p className="text-xs text-gray-400 mt-1">{SCORE_LABELS[compScores[item.key]]}</p></div>))}</div>
-
-            <div className="bg-white rounded-lg shadow p-6"><h2 className="text-lg font-bold text-primary mb-4">개선사항 및 육성계획</h2><p className="text-sm text-gray-500 mb-2">50자 이상 기재 필수</p><textarea value={comment} onChange={(e)=>setComment(e.target.value)} rows={4} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-secondary focus:outline-none" placeholder="개선이 필요한 사항, 육성 계획을 작성해주세요..."/><p className={`text-sm mt-1 ${comment.length>=50?'text-green-600':'text-red-500'}`}>{comment.length}자 / 최소 50자</p></div>
-
-            <div className="bg-primary text-white rounded-lg shadow p-6 text-center"><p className="text-sm mb-1">종합점수</p><p className="text-5xl font-bold mb-2">{calcTotal()}</p><p className="text-sm opacity-75">성과({Math.round(calcPerfScore()*100)/100}) × 70% + 역량({Math.round(calcCompScore()*100)/100}) × 30%</p></div>
-            <div className="flex justify-end"><button onClick={handleSaveFirst} disabled={saving} className="flex items-center space-x-2 px-8 py-3 bg-secondary text-white rounded-lg hover:bg-opacity-90 transition disabled:opacity-50 text-lg font-medium"><Save size={20}/><span>{saving?'저장 중...':'1차 평가 등록'}</span></button></div>
-          </>)}
+              <div><h3 className="text-sm font-bold text-gray-500 mb-2">개선사항 및 육성계획 <span className="text-xs font-normal text-red-500">(50자 이상)</span></h3><textarea value={detailComment} onChange={e=>setDetailComment(e.target.value)} rows={3} className="w-full px-3 py-2 border border-gray-300 rounded text-sm" placeholder="개선사항 및 육성계획..."/><p className={`text-xs mt-1 ${detailComment.length>=50?"text-green-600":"text-red-500"}`}>{detailComment.length}자</p></div>
+            </div>
+            <div className="flex justify-end space-x-3 p-6 border-t sticky bottom-0 bg-white rounded-b-xl"><button onClick={()=>setDetailEmp(null)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm">취소</button><button onClick={handleSaveDetail} disabled={saving} className="flex items-center space-x-2 px-6 py-2 bg-secondary text-white rounded-lg text-sm disabled:opacity-50"><Save size={14}/><span>저장</span></button></div>
+          </div>
         </div>
       )}
-
-      {evalMode==='second'&&!saved&&(
-        <div className="space-y-6">
-          <div className="bg-white rounded-lg shadow p-6"><h2 className="text-lg font-bold text-primary mb-4">상대평가 비율</h2><div className="grid grid-cols-2 gap-6">{(['leaders','members'] as const).map((group)=>(<div key={group} className="border rounded-lg p-4"><h3 className="font-bold text-primary mb-3">{group==='leaders'?'팀장이상':'팀원'} ({gradeStats[group].total}명)</h3><table className="w-full text-sm"><thead><tr className="border-b"><th className="text-left py-1">등급</th><th className="text-center py-1">비율</th><th className="text-center py-1">기준</th><th className="text-center py-1">부여</th><th className="text-center py-1">차이</th></tr></thead><tbody>{(['상','중','하'] as const).map((g)=>{const s=gradeStats[group][g];const d=s.target-s.assigned;return(<tr key={g} className="border-b"><td className={`py-2 font-bold ${g==='상'?'text-green-600':g==='중'?'text-yellow-600':'text-red-600'}`}>{g}</td><td className="text-center">{g==='상'?'30%':g==='중'?'40%':'30%'}</td><td className="text-center">{s.target}명</td><td className="text-center font-bold">{s.assigned}명</td><td className={`text-center font-bold ${d===0?'text-green-600':d>0?'text-blue-600':'text-red-600'}`}>{d>0?`+${d}`:d}</td></tr>);})}</tbody></table></div>))}</div></div>
-          <div className="bg-white rounded-lg shadow p-6"><h2 className="text-lg font-bold text-primary mb-4">등급 부여</h2><div className="overflow-x-auto"><table className="w-full text-sm"><thead className="bg-light"><tr><th className="text-left px-4 py-2">이름</th><th className="text-left px-4 py-2">팀</th><th className="text-left px-4 py-2">직책분류</th><th className="text-center px-4 py-2">1차평가</th><th className="text-center px-4 py-2">최종등급</th></tr></thead><tbody>{deptEvaluatees.map((emp)=>{const ev=existingEvals.find((e)=>e.employee_id===emp.id&&e.content_json?.fileType==='evaluation_opinion');const ts=ev?.content_json?.totalScore||'-';return(<tr key={emp.id} className="border-b border-gray-100 hover:bg-light"><td className="px-4 py-3 font-medium">{emp.name}</td><td className="px-4 py-3 text-gray-600">{emp.team}</td><td className="px-4 py-3"><span className={`px-2 py-1 rounded text-xs font-bold ${emp.group_type==='팀장급'?'bg-purple-100 text-purple-700':'bg-blue-100 text-blue-700'}`}>{emp.group_type}</span></td><td className="px-4 py-3 text-center font-bold">{ts}</td><td className="px-4 py-3 text-center"><div className="flex justify-center space-x-2">{['상','중','하'].map((g)=>(<button key={g} onClick={()=>setGrades({...grades,[emp.id]:grades[emp.id]===g?'':g})} className={`w-10 h-10 rounded-lg font-bold text-sm transition ${grades[emp.id]===g?(g==='상'?'bg-green-500 text-white':g==='중'?'bg-yellow-500 text-white':'bg-red-500 text-white'):'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{g}</button>))}</div></td></tr>);})}</tbody></table></div></div>
-          <div className="flex justify-end"><button onClick={handleSaveSecond} disabled={saving} className="flex items-center space-x-2 px-8 py-3 bg-secondary text-white rounded-lg hover:bg-opacity-90 transition disabled:opacity-50 text-lg font-medium"><Save size={20}/><span>{saving?'저장 중...':'2차 평가 등록'}</span></button></div>
-        </div>
-      )}
-
-      {saved&&(<div className="bg-white rounded-lg shadow p-12 text-center"><CheckCircle size={64} className="mx-auto mb-4 text-green-500"/><h2 className="text-2xl font-bold text-primary mb-2">평가 등록 완료</h2><p className="text-gray-600 mb-6">{evalMode==='first'?'1차 평가의견서가':'2차 평가 등급이'} 성공적으로 등록되었습니다.</p><div className="flex justify-center space-x-4"><button onClick={()=>{setSaved(false);setSelectedEvaluatee('');setAchievements(['','','']);setPerfScores({delivery:4,quality:4,efficiency:4});setCompScores({leadership:4,growth:4,ethics:4});setComment('');}} className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">다른 구성원 평가하기</button><Link href="/admin/review" className="px-6 py-2 bg-primary text-white rounded-lg hover:bg-opacity-90">평가 데이터 조회</Link></div></div>)}
     </div>
   );
 }
