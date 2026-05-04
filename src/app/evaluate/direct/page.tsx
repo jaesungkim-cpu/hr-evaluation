@@ -369,8 +369,10 @@ export default function EvaluatePage() {
                         const compTotal = Math.round(calcScore(COMP, s)*100)/100;
                         const total = getInlineTotal(emp.id);
                         const selfEv = getSelfEval(emp.id);
-                        const sortedTotals = evaluatees.map(e=>getInlineTotal(e.id)).sort((a,b)=>b-a);
+                        const sameGroupList = evaluatees.filter(e=>e.group_type===emp.group_type);
+                        const sortedTotals = sameGroupList.map(e=>getInlineTotal(e.id)).sort((a,b)=>b-a);
                         const rank = sortedTotals.indexOf(total) + 1;
+                        const groupCount = sameGroupList.length;
                         return (
                           <tr key={emp.id} className="border-b border-gray-100 hover:bg-blue-50">
                             <td className="px-2 py-2 text-xs">{emp.department}</td>
@@ -385,7 +387,7 @@ export default function EvaluatePage() {
                             {COMP.map(p=>(<td key={p.k} className="px-1 py-1 text-center"><select value={s[p.k]||4} onChange={e=>setInlineScore(emp.id,p.k,Number(e.target.value))} className="w-12 text-center text-xs border border-gray-300 rounded py-1">{[1,2,3,4,5,6,7].map(v=>(<option key={v} value={v}>{v}</option>))}</select></td>))}
                             <td className="px-2 py-2 text-center border-r font-bold text-xs">{compTotal}</td>
                             <td className="px-2 py-2 text-center border-r font-bold text-secondary">{total}</td>
-                            <td className="px-2 py-2 text-center text-xs text-gray-600">{rank}/{evaluatees.length}</td>
+                            <td className="px-2 py-2 text-center text-xs text-gray-600">{rank}/{groupCount}</td>
                           </tr>
                         );
                       })}
@@ -505,4 +507,4 @@ export default function EvaluatePage() {
       )}
     </div>
   );
-} 
+}
