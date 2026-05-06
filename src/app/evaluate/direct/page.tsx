@@ -1,17 +1,14 @@
 "use client";
-
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { Employee } from "@/lib/types";
 import Link from "next/link";
 import { ArrowLeft, Save, Send, X, ChevronDown, FileText, AlertCircle, CheckCircle, Clock } from "lucide-react";
-
 type Emp = Employee & { division?: string | null };
 const PERF = [{k:"delivery",l:"납기",w:35},{k:"quality",l:"품질",w:35},{k:"efficiency",l:"효율",w:30}];
 const COMP = [{k:"leadership",l:"리더십",w:35},{k:"growth",l:"성장지향성",w:35},{k:"ethics",l:"윤리의식",w:30}];
 const calcScore = (items: {k:string,w:number}[], scores: Record<string,number>) => items.reduce((s,i)=>s+(scores[i.k]||0)*i.w,0)/7;
-
 export default function EvaluatePage() {
   const router = useRouter();
   const [user, setUser] = useState<Emp|null>(null);
@@ -41,7 +38,6 @@ export default function EvaluatePage() {
   const [secondDetailEmp, setSecondDetailEmp] = useState<Emp|null>(null);
   const [secondDetailScores, setSecondDetailScores] = useState<Record<string,number>>({delivery:4,quality:4,efficiency:4,leadership:4,growth:4,ethics:4});
   const [secondDetailGrade, setSecondDetailGrade] = useState("");
-
   useEffect(()=>{loadData();},[]);
   const loadData = async () => {
     try {
@@ -63,7 +59,6 @@ export default function EvaluatePage() {
       if (ud.department) setSelectedOrg(ud.department + (ud.team ? "/" + ud.team : ""));
     } catch(e) { console.error(e); } finally { setLoading(false); }
   };
-
   // Available roles for this user
   const availableRoles = useMemo(() => {
     if (!user) return [];
@@ -80,7 +75,6 @@ export default function EvaluatePage() {
     }
     return roles;
   }, [user]);
-
   // Available orgs
   const availableOrgs = useMemo(() => {
     if (!user) return [];
@@ -93,7 +87,6 @@ export default function EvaluatePage() {
     if (user.team) orgs.push({value:user.department+"/"+user.team,label:user.team});
     return orgs;
   }, [user, employees]);
-
   // Filtered evaluatees based on role + org
   const evaluatees = useMemo(() => {
     if (!user) return [];
@@ -118,7 +111,6 @@ export default function EvaluatePage() {
     }
     return list;
   }, [user, employees, selectedRole, selectedOrg]);
-
   // Stats
   const stats = useMemo(() => {
     const total = evaluatees.length;
@@ -133,12 +125,10 @@ export default function EvaluatePage() {
     }, 0) / (completed || 1);
     return { total, target, completed, avgScore: Math.round(avgScore*10)/10, status: completed === 0 ? "미진행" : completed >= target ? "제출완료" : "진행 중" };
   }, [evaluatees, evals, selectedRole]);
-
   // Get employee's eval data
   const getEval = (empId: string, type: string) => evals.find(e => e.employee_id === empId && e.content_json?.fileType === type);
   const getSelfEval = (empId: string) => getEval(empId, "self_assessment");
   const getFirstEval = (empId: string) => getEval(empId, "evaluation_opinion");
-
   // Score handlers for inline table
   const setInlineScore = (empId: string, key: string, val: number) => {
     setScores(prev => ({...prev, [empId]: {...(prev[empId]||{delivery:4,quality:4,efficiency:4,leadership:4,growth:4,ethics:4}), [key]: val}}));
@@ -155,7 +145,6 @@ export default function EvaluatePage() {
     const comp = calcScore(COMP, s);
     return Math.round((perf * 0.7 + comp * 0.3) * 100) / 100;
   };
-
   // Save all inline scores
   const handleSaveAll = async () => {
     setSaving(true);
@@ -178,7 +167,6 @@ export default function EvaluatePage() {
       await loadData();
     } catch(e) { console.error(e); alert("저장 중 오류"); } finally { setSaving(false); }
   };
-
   // Submit (final)
   const handleSubmit = async () => {
     if (!confirm("제출완료 후에는 수정할 수 없습니다. 제출하시겠습니까?")) return;
@@ -186,7 +174,6 @@ export default function EvaluatePage() {
     setSubmitStatus("submitted");
     alert("제출이 완료되었습니다.");
   };
-
   // Save self evaluation
   const handleSaveSelf = async () => {
     setSaving(true);
@@ -202,7 +189,6 @@ export default function EvaluatePage() {
       await loadData();
     } catch(e) { console.error(e); alert("저장 중 오류"); } finally { setSaving(false); }
   };
-
   // Save detail modal
   const handleSaveDetail = async () => {
     if (!detailEmp) return;
@@ -223,7 +209,6 @@ export default function EvaluatePage() {
       await loadData();
     } catch(e) { console.error(e); alert("저장 중 오류"); } finally { setSaving(false); }
   };
-
   // Open detail modal
   const openDetail = (emp: Emp) => {
     const ev = getFirstEval(emp.id);
@@ -243,7 +228,6 @@ export default function EvaluatePage() {
       setDetailAchievements(selfEv.content_json.achievements.length >= 3 ? selfEv.content_json.achievements : [...selfEv.content_json.achievements, ...Array(3-selfEv.content_json.achievements.length).fill("")]);
     }
   };
-
   // 2nd eval: save grades
   const handleSaveGrades = async () => {
     const entries = Object.entries(grades).filter(([,v])=>v);
@@ -263,7 +247,6 @@ export default function EvaluatePage() {
       await loadData();
     } catch(e) { console.error(e); alert("저장 중 오류"); } finally { setSaving(false); }
   };
-
   // Grade stats for 2nd eval
   const gradeStats = useMemo(() => {
     const l = evaluatees.filter(e=>e.group_type==="팀장급");
@@ -274,15 +257,12 @@ export default function EvaluatePage() {
       members:{total:m.length,상:{t:Math.round(m.length*0.3),a:cnt(m,"상")},중:{t:Math.round(m.length*0.4),a:cnt(m,"중")},하:{t:Math.round(m.length*0.3),a:cnt(m,"하")}},
     };
   }, [evaluatees, grades, evals]);
-
   if (loading) return <div className="flex items-center justify-center min-h-screen"><div className="spinner mx-auto mb-4"></div><p className="text-gray-600">로딩 중...</p></div>;
   if (!user) return <div className="flex items-center justify-center min-h-screen"><p className="text-gray-600">로그인이 필요합니다</p></div>;
-
   return (
     <div className="min-h-screen bg-light">
       <div className="container mx-auto py-6">
         <div className="flex items-center space-x-4 mb-4"><Link href="/dashboard" className="flex items-center space-x-2 text-secondary hover:text-primary transition"><ArrowLeft size={20}/><span>대시보드</span></Link></div>
-
         <div className="flex gap-6">
           {/* Left Panel */}
           <div className="w-64 flex-shrink-0">
@@ -299,11 +279,9 @@ export default function EvaluatePage() {
               </div>
             </div>
           </div>
-
           {/* Main Content */}
           <div className="flex-1">
             <h1 className="text-2xl font-bold text-primary mb-4">{selectedRole==="self"?"본인평가":selectedRole==="first"?"1차 평가자 화면":selectedRole==="second"?"2차 평가자 화면":"CEO 최종승인"}</h1>
-
             {/* Stats Bar */}
             <div className="bg-white rounded-lg shadow p-4 mb-4">
               <h3 className="text-sm font-bold text-gray-500 mb-3">평가진행 현황</h3>
@@ -316,7 +294,6 @@ export default function EvaluatePage() {
                 <div><p className="text-gray-500">제출마감</p><p className="text-lg font-bold text-red-500">-</p></div>
               </div>
             </div>
-
             {/* Self Evaluation */}
             {selectedRole === "self" && (
               <div className="bg-white rounded-lg shadow p-6">
@@ -330,7 +307,6 @@ export default function EvaluatePage() {
                 </div>
               </div>
             )}
-
             {/* 1st Evaluator Table */}
             {selectedRole === "first" && (
               <div className="bg-white rounded-lg shadow">
@@ -396,7 +372,6 @@ export default function EvaluatePage() {
                 </div>
               </div>
             )}
-
             {/* 2nd Evaluator */}
             {(selectedRole === "second" || selectedRole === "ceo") && (
               <div className="space-y-4">
@@ -445,7 +420,6 @@ export default function EvaluatePage() {
           </div>
         </div>
       </div>
-
       {/* 2nd Eval Detail Modal */}
       {secondDetailEmp && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={()=>setSecondDetailEmp(null)}>
@@ -453,7 +427,7 @@ export default function EvaluatePage() {
             <div className="flex items-center justify-between p-6 border-b sticky top-0 bg-white rounded-t-xl"><h2 className="text-xl font-bold text-primary">{secondDetailEmp.name} 평가 상세</h2><button onClick={()=>setSecondDetailEmp(null)} className="text-gray-400 hover:text-gray-600"><X size={24}/></button></div>
             <div className="p-6 space-y-6">
               <div className="grid grid-cols-4 gap-3 text-sm"><div className="bg-light p-2 rounded"><span className="text-gray-500">본부</span><p className="font-medium">{secondDetailEmp.department}</p></div><div className="bg-light p-2 rounded"><span className="text-gray-500">팀</span><p className="font-medium">{secondDetailEmp.team}</p></div><div className="bg-light p-2 rounded"><span className="text-gray-500">직책</span><p className="font-medium">{secondDetailEmp.title}</p></div><div className="bg-light p-2 rounded"><span className="text-gray-500">그룹</span><p className="font-medium">{secondDetailEmp.group_type}</p></div></div>
-              
+
               {/* 1차 평가 결과 */}
               {(()=>{const ev=getFirstEval(secondDetailEmp.id);if(!ev) return <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3"><p className="text-yellow-700 text-sm font-bold">1차 평가 미등록</p></div>;const c=ev.content_json;return(<div className="space-y-4">
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-4"><p className="font-bold text-amber-700 text-sm mb-2">1차 평가 결과 (평가자: {c.evaluator?.name||"-"})</p>
@@ -464,8 +438,9 @@ export default function EvaluatePage() {
                   </div>
                   <div className="mt-3 bg-primary text-white rounded p-3 text-center"><span className="text-sm">종합점수</span><p className="text-3xl font-bold">{c.totalScore||"-"}</p></div>
                   {c.comment&&<div className="mt-2 bg-white rounded p-2"><p className="text-xs text-gray-500">개선사항/육성계획</p><p className="text-xs text-gray-700">{c.comment}</p></div>}
-                </div>);})()}
-              
+                </div>
+              </div>);})()}
+
               {/* 2차 평가 입력 */}
               <div className="border-2 border-primary rounded-lg p-4">
                 <h3 className="font-bold text-primary mb-3">2차 평가 (등급 부여)</h3>
@@ -479,7 +454,6 @@ export default function EvaluatePage() {
           </div>
         </div>
       )}
-
       {/* Detail Modal */}
       {detailEmp && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={()=>setDetailEmp(null)}>
@@ -487,18 +461,14 @@ export default function EvaluatePage() {
             <div className="flex items-center justify-between p-6 border-b sticky top-0 bg-white rounded-t-xl"><h2 className="text-xl font-bold text-primary">{detailEmp.name} 개인별 평가</h2><button onClick={()=>setDetailEmp(null)} className="text-gray-400 hover:text-gray-600"><X size={24}/></button></div>
             <div className="p-6 space-y-6">
               <div className="grid grid-cols-4 gap-3 text-sm"><div className="bg-light p-2 rounded"><span className="text-gray-500">본부</span><p className="font-medium">{detailEmp.department}</p></div><div className="bg-light p-2 rounded"><span className="text-gray-500">팀</span><p className="font-medium">{detailEmp.team}</p></div><div className="bg-light p-2 rounded"><span className="text-gray-500">직책</span><p className="font-medium">{detailEmp.title}</p></div><div className="bg-light p-2 rounded"><span className="text-gray-500">그룹</span><p className="font-medium">{detailEmp.group_type}</p></div></div>
-              
+
               {getSelfEval(detailEmp.id) && <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center justify-between"><div><p className="font-bold text-blue-700 text-sm">본인업적기술서 등록됨</p><p className="text-xs text-blue-600">{getSelfEval(detailEmp.id)?.content_json?.achievements?.length||0}건의 성과</p></div><button onClick={()=>{const sa=getSelfEval(detailEmp.id)?.content_json;if(sa?.achievements){const a=sa.achievements;setDetailAchievements(a.length>=3?a:[...a,...Array(3-a.length).fill("")]);}}} className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium">불러오기</button></div>}
-
               <div><h3 className="text-sm font-bold text-gray-500 mb-2">주요 성과</h3>{detailAchievements.map((a,i)=>(<div key={i} className="mb-3"><label className="text-xs font-medium text-gray-600">성과 {i+1}</label><textarea value={a} onChange={e=>{const n=[...detailAchievements];n[i]=e.target.value;setDetailAchievements(n);}} rows={2} className="w-full px-3 py-2 border border-gray-300 rounded text-sm"/></div>))}<button onClick={()=>setDetailAchievements([...detailAchievements,""])} className="text-secondary text-xs">+ 추가</button></div>
-
               <div className="grid grid-cols-2 gap-4">
                 <div className="border rounded-lg p-4"><h3 className="text-sm font-bold text-primary mb-3">성과평가 (70%)</h3>{PERF.map(p=>(<div key={p.k} className="flex items-center justify-between mb-2"><span className="text-sm">{p.l} ({p.w}%)</span><select value={detailScores[p.k]||4} onChange={e=>setDetailScores({...detailScores,[p.k]:Number(e.target.value)})} className="w-14 text-center border rounded py-1 text-sm">{[1,2,3,4,5,6,7].map(v=>(<option key={v} value={v}>{v}</option>))}</select></div>))}<div className="pt-2 border-t font-bold text-primary flex justify-between"><span>합계</span><span>{Math.round(calcScore(PERF,detailScores)*100)/100}</span></div></div>
                 <div className="border rounded-lg p-4"><h3 className="text-sm font-bold text-primary mb-3">역량평가 (30%)</h3>{COMP.map(p=>(<div key={p.k} className="flex items-center justify-between mb-2"><span className="text-sm">{p.l} ({p.w}%)</span><select value={detailScores[p.k]||4} onChange={e=>setDetailScores({...detailScores,[p.k]:Number(e.target.value)})} className="w-14 text-center border rounded py-1 text-sm">{[1,2,3,4,5,6,7].map(v=>(<option key={v} value={v}>{v}</option>))}</select></div>))}<div className="pt-2 border-t font-bold text-primary flex justify-between"><span>합계</span><span>{Math.round(calcScore(COMP,detailScores)*100)/100}</span></div></div>
               </div>
-
               <div className="bg-primary text-white rounded-lg p-4 text-center"><span className="text-sm">종합점수</span><p className="text-4xl font-bold">{Math.round((calcScore(PERF,detailScores)*0.7+calcScore(COMP,detailScores)*0.3)*100)/100}</p></div>
-
               <div><h3 className="text-sm font-bold text-gray-500 mb-2">개선사항 및 육성계획 <span className="text-xs font-normal text-red-500">(50자 이상)</span></h3><textarea value={detailComment} onChange={e=>setDetailComment(e.target.value)} rows={3} className="w-full px-3 py-2 border border-gray-300 rounded text-sm" placeholder="개선사항 및 육성계획..."/><p className={`text-xs mt-1 ${detailComment.length>=50?"text-green-600":"text-red-500"}`}>{detailComment.length}자</p></div>
             </div>
             <div className="flex justify-end space-x-3 p-6 border-t sticky bottom-0 bg-white rounded-b-xl"><button onClick={()=>setDetailEmp(null)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm">취소</button><button onClick={handleSaveDetail} disabled={saving} className="flex items-center space-x-2 px-6 py-2 bg-secondary text-white rounded-lg text-sm disabled:opacity-50"><Save size={14}/><span>저장</span></button></div>
