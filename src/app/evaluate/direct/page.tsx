@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { Employee } from "@/lib/types";
@@ -39,6 +39,14 @@ const getDivisionByTitle = (emp: Emp | null): string | null => {
 
 const isHonbujang = (emp: Emp | null): boolean => !!emp && (emp.title || "").indexOf("본부장") >= 0;
 
+// Phase3: 직책에서 팀명 추출 (user.team이 데이터와 안 맞을 때 보정용)
+// 예: "부산센터장" → "부산센터", "세팅팀장" → "세팅팀"
+const extractTeamFromTitle = (title: string | null | undefined): string | null => {
+  if (!title) return null;
+  if (/(센터장|팀장)$/.test(title)) return title.replace(/장$/, "");
+  return null;
+};
+
 export default function EvaluatePage() {
   const router = useRouter();
   const [user, setUser] = useState<Emp|null>(null);
@@ -66,6 +74,8 @@ export default function EvaluatePage() {
   const [sortBy, setSortBy] = useState<{col:string, asc:boolean}>({col:"", asc:true});
   const toggleSort = (col: string) => setSortBy(prev => ({col, asc: prev.col === col ? !prev.asc : true}));
   const sortArrow = (col: string) => sortBy.col === col ? (sortBy.asc ? " ↑" : " ↓") : "";
+  // Phase3: 첫 진입에만 selectedRole/selectedOrg 초기화 (저장 후엔 유지)
+  const isFirstLoadRef = useRef(true);
 
   useEffect(()=>{loadData();},[]);
 
@@ -81,23 +91,32 @@ export default function EvaluatePage() {
       if (emps) setEmployees(emps as Emp[]);
       const { data: ev } = await supabase.from("self_assessments").select("*");
       if (ev) setEvals(ev);
-      if (udTyped.role === "first_evaluator") setSelectedRole("first");
-      else if (udTyped.role === "second_evaluator") setSelectedRole("second");
-      else if (udTyped.role === "admin") setSelectedRole("first");
-      else if (udTyped.role === "ceo") setSelectedRole("ceo");
-      else setSelectedRole("self");
-      if (udTyped.department) setSelectedOrg(udTyped.department + (udTyped.team ? "/" + udTyped.team : ""));
+      // 첫 진입에만 role/org 초기화 (저장 후 loadData 재호출 시엔 유지)
+      if (isFirstLoadRef.current) {
+        if (isHonbujang(udTyped)) setSelectedRole("first");
+        else if (udTyped.role === "first_evaluator") setSelectedRole("first");
+        else if (udTyped.role === "second_evaluator") setSelectedRole("second");
+        else if (udTyped.role === "admin") setSelectedRole("first");
+        else if (udTyped.role === "ceo") setSelectedRole("ceo");
+        else setSelectedRole("self");
+        if (udTyped.department) setSelectedOrg(udTyped.department + (udTyped.team ? "/" + udTyped.team : ""));
+        isFirstLoadRef.current = false;
+      }
     } catch(e) { console.error(e); } finally { setLoading(false); }
   };
 
   const availableRoles = useMemo(() => {
     if (!user) return [];
     const roles: {value:string,label:string}[] = [];
-    roles.push({value:"self",label:"본인평가"});
-    if (user.role === "first_evaluator" || user.role === "admin") {
+    // Phase3: 본부장은 본인평가 제외
+    if (!isHonbujang(user)) {
+      roles.push({value:"self",label:"본인평가"});
+    }
+    // Phase3: 본부장에게 1차 평가자 권한 추가
+    if (user.role === "first_evaluator" || user.role === "admin" || isHonbujang(user)) {
       roles.push({value:"first",label:"1차 평가자"});
     }
-    if (user.role === "second_evaluator" || user.role === "admin") {
+    if (user.role === "second_evaluator" || user.role === "admin" || isHonbujang(user)) {
       roles.push({value:"second",label:"2차 평가자"});
     }
     if (user.role === "ceo" || user.role === "admin") {
@@ -129,20 +148,31 @@ export default function EvaluatePage() {
       if (user.role === "admin") {
         if (selectedOrg) list = list.filter(e => e.department === selectedOrg || (e.department+"/"+e.team) === selectedOrg);
       } else {
+        const userTitle = user.title || "";
         const userDivision = getDivisionByTitle(user);
         const teamList = userDivision ? DIVISION_TEAMS[userDivision] : null;
-        const titleStr = user.title || "";
-        if (teamList && teamList.length > 0) {
-          // #8: 설치업무1실/2실장은 해당 실의 하위 팀만
-          list = list.filter(e => teamList.indexOf(e.team || "") >= 0 && e.id !== user.id);
-        } else if (titleStr.indexOf("센터장") >= 0) {
-          // #9: 센터장은 자기 센터(team)만
-          list = list.filter(e => e.team === user.team && e.id !== user.id);
-        } else if (titleStr.indexOf("팀장") >= 0) {
-          // 팀장은 자기 팀만
-          list = list.filter(e => e.team === user.team && e.id !== user.id);
+        const extractedTeam = extractTeamFromTitle(userTitle);
+
+        if (isHonbujang(user)) {
+          // Phase3: 본부장은 같은 본부의 팀장이상 (본인+다른 본부장 제외)
+          list = list.filter(e => e.department === user.department && e.group_type === "팀장급" && !isHonbujang(e) && e.id !== user.id);
+        } else if (teamList && teamList.length > 0) {
+          // #8: 설치업무1실/2실장. division 필드 우선 → team 매핑 fallback
+          let candidates = list.filter(e => e.division === userDivision);
+          if (candidates.length === 0) {
+            candidates = list.filter(e => teamList!.indexOf(e.team || "") >= 0);
+          }
+          list = candidates.filter(e => e.id !== user.id);
+        } else if (userTitle.indexOf("센터장") >= 0) {
+          // #9: 센터장은 자기 센터. 직책에서 추출한 팀명 우선
+          const targetTeam = extractedTeam || user.team;
+          list = list.filter(e => e.team === targetTeam && e.id !== user.id);
+        } else if (userTitle.indexOf("팀장") >= 0) {
+          // 팀장은 자기 팀
+          const targetTeam = extractedTeam || user.team;
+          list = list.filter(e => e.team === targetTeam && e.id !== user.id);
         } else {
-          // 그 외: first_evaluator_id 매핑 (없으면 빈 목록)
+          // 그 외: first_evaluator_id 매핑
           list = list.filter(e => e.first_evaluator_id === user.id);
         }
       }
@@ -453,6 +483,12 @@ export default function EvaluatePage() {
       const ts = (v && v.content_json && v.content_json.totalScore) || 0;
       if (sortBy.col === "first") return ts;
       if (sortBy.col === "teamAvg") {
+        // Phase3: 팀장급은 본부평균과 동일
+        if (e.group_type === "팀장급") {
+          const sd = evaluatees.filter(x => x.department === e.department && x.is_evaluated !== false && !isHonbujang(x));
+          const ss = sd.map(x => { const vv = getFirstEval(x.id); return (vv && vv.content_json && vv.content_json.totalScore) || 0; }).filter(s => s > 0);
+          return ss.length > 0 ? ss.reduce((a,b) => a + b, 0) / ss.length : 0;
+        }
         const st = evaluatees.filter(x => x.team === e.team && x.is_evaluated !== false && !isHonbujang(x));
         const ss = st.map(x => { const vv = getFirstEval(x.id); return (vv && vv.content_json && vv.content_json.totalScore) || 0; }).filter(s => s > 0);
         return ss.length > 0 ? ss.reduce((a,b) => a + b, 0) / ss.length : 0;
@@ -700,14 +736,19 @@ export default function EvaluatePage() {
                       const sameGroup = evaluatees.filter(e=>e.group_type===emp.group_type&&e.is_evaluated!==false);
                       const validScores = sameGroup.map(e=>{const v=getFirstEval(e.id);return v?.content_json?.totalScore||0;}).filter(s=>s>0);
                       const groupAvg = validScores.length>0 ? validScores.reduce((a,b)=>a+b,0)/validScores.length : 0;
-                      // 팀평균(같은 team) - 0점 제외
-                      const sameTeam = evaluatees.filter(e=>e.team===emp.team&&e.is_evaluated!==false&&!isHonbujang(e));
-                      const teamScores = sameTeam.map(e=>{const v=getFirstEval(e.id);return v?.content_json?.totalScore||0;}).filter(s=>s>0);
-                      const teamAvg = teamScores.length>0 ? teamScores.reduce((a,b)=>a+b,0)/teamScores.length : 0;
                       // 본부평균(같은 department) - 0점 제외
                       const sameDept = evaluatees.filter(e=>e.department===emp.department&&e.is_evaluated!==false&&!isHonbujang(e));
                       const deptScores = sameDept.map(e=>{const v=getFirstEval(e.id);return v?.content_json?.totalScore||0;}).filter(s=>s>0);
                       const deptAvg = deptScores.length>0 ? deptScores.reduce((a,b)=>a+b,0)/deptScores.length : 0;
+                      // 팀평균(같은 team) - 0점 제외. Phase3: 팀장급은 본부평균과 동일
+                      let teamAvg = 0;
+                      if (emp.group_type === "팀장급") {
+                        teamAvg = deptAvg;
+                      } else {
+                        const sameTeam = evaluatees.filter(e=>e.team===emp.team&&e.is_evaluated!==false&&!isHonbujang(e));
+                        const teamScores = sameTeam.map(e=>{const v=getFirstEval(e.id);return v?.content_json?.totalScore||0;}).filter(s=>s>0);
+                        teamAvg = teamScores.length>0 ? teamScores.reduce((a,b)=>a+b,0)/teamScores.length : 0;
+                      }
                       // 조정점수는 그룹(직책분류) 평균 기준
                       const adjustedScore = ts && groupAvg ? Math.round(ts*(ts/groupAvg)*10)/10 : 0;
                       const sortedScores = sameGroup.map(e=>{const v=getFirstEval(e.id);const t=v?.content_json?.totalScore||0;return t&&groupAvg?t*(t/groupAvg):0;}).sort((a,b)=>b-a);
