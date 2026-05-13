@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { Employee } from "@/lib/types";
 import Link from "next/link";
-import { ArrowLeft, Save, Send, X, RotateCcw } from "lucide-react";
+import { ArrowLeft, Save, Send, X, RotateCcw, FileText, Upload, Download } from "lucide-react";
 
 // Phase1: 타입을 느슨하게 확장하여 빌드 에러 방지
 type Emp = Employee & {
@@ -77,6 +77,12 @@ export default function EvaluatePage() {
   const [secondDetailEmp, setSecondDetailEmp] = useState<Emp|null>(null);
   const [secondDetailScores, setSecondDetailScores] = useState<Record<string,number>>({delivery:0,quality:0,efficiency:0,leadership:0,growth:0,ethics:0});
   const [secondDetailGrade, setSecondDetailGrade] = useState("");
+  // Phase3 #10: 구성원 본인평가 불러오기 모달
+  const [memberPickerOpen, setMemberPickerOpen] = useState(false);
+  const [pickedKeys, setPickedKeys] = useState<Record<string, boolean>>({});
+  // Phase3 #12: 본인평가서 업로드 모달
+  const [uploadOpen, setUploadOpen] = useState<{empId:string}|null>(null);
+  const [uploadFile, setUploadFile] = useState<{name:string, data:string, size:number}|null>(null);
   // Phase2 #20: 컬럼 정렬 상태
   const [sortBy, setSortBy] = useState<{col:string, asc:boolean}>({col:"", asc:true});
   const toggleSort = (col: string) => setSortBy(prev => ({col, asc: prev.col === col ? !prev.asc : true}));
@@ -206,6 +212,28 @@ export default function EvaluatePage() {
     }
     return list;
   }, [user, employees, selectedRole, selectedOrg]);
+
+  // Phase3 #10: 자기 평가대상자 목록 (본인평가 화면의 불러오기용)
+  const myMembers = useMemo<Emp[]>(() => {
+    if (!user) return [];
+    const userTitle = user.title || "";
+    const userDivision = getDivisionByTitle(user);
+    const teamList = userDivision ? DIVISION_TEAMS[userDivision] : null;
+    const extractedTeam = extractTeamFromTitle(userTitle);
+    if (isHonbujang(user)) {
+      return employees.filter(e => e.department === user.department && e.group_type === "팀장급" && !isHonbujang(e) && e.id !== user.id);
+    }
+    if (teamList && teamList.length > 0) {
+      let cands = employees.filter(e => e.division === userDivision);
+      if (cands.length === 0) cands = employees.filter(e => teamList!.indexOf(e.team || "") >= 0);
+      return cands.filter(e => e.id !== user.id);
+    }
+    if (userTitle.indexOf("센터장") >= 0 || userTitle.indexOf("팀장") >= 0) {
+      const targetTeam = extractedTeam || user.team;
+      return employees.filter(e => e.team === targetTeam && e.id !== user.id);
+    }
+    return [];
+  }, [user, employees]);
 
   // Phase1 #11: submitted 플래그 기반 카운팅
   const stats = useMemo(() => {
@@ -378,7 +406,10 @@ export default function EvaluatePage() {
       const total = Math.round((perf*0.7+comp*0.3)*100)/100;
       const existing = getFirstEval(detailEmp.id);
       const wasSubmitted = existing?.content_json?.submitted === true;
-      const data = { fileType: "evaluation_opinion", evaluator: {name:user?.name,department:user?.department,type:"1차평가자"}, achievements: detailAchievements.filter(a=>a.trim()), scores: detailScores, perfScore: Math.round(perf*100)/100, compScore: Math.round(comp*100)/100, totalScore: total, comment: detailComment, submitted: wasSubmitted, registeredVia: "web_app" };
+      // Phase3 #12: 첨부 파일 (기존 파일 유지 + 새 업로드 우선)
+      const existingFile = existing?.content_json?.attachedFile;
+      const newFile = uploadFile;
+      const data = { fileType: "evaluation_opinion", evaluator: {name:user?.name,department:user?.department,type:"1차평가자"}, achievements: detailAchievements.filter(a=>a.trim()), scores: detailScores, perfScore: Math.round(perf*100)/100, compScore: Math.round(comp*100)/100, totalScore: total, comment: detailComment, attachedFile: newFile || existingFile || null, submitted: wasSubmitted, registeredVia: "web_app" };
       if (existing) {
         await supabase.from("self_assessments").update({content_json: {...existing.content_json, ...data}}).eq("id", existing.id);
       } else {
@@ -393,6 +424,7 @@ export default function EvaluatePage() {
   const openDetail = (emp: Emp) => {
     const ev = getFirstEval(emp.id);
     setDetailEmp(emp);
+    setUploadFile(null); // Phase3 #12: 새 업로드 상태 초기화
     if (ev && ev.content_json) {
       const ach = ev.content_json.achievements;
       setDetailAchievements(Array.isArray(ach) && ach.length > 0 ? (ach.length >= 3 ? ach : [...ach, ...Array(3-ach.length).fill("")]) : ["","",""]);
@@ -595,7 +627,15 @@ export default function EvaluatePage() {
 
             {selectedRole === "self" && (
               <div className="bg-white rounded-lg shadow p-6">
-                <h2 className="text-lg font-bold text-primary mb-4">주요 성과</h2>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-bold text-primary">주요 성과</h2>
+                  {/* Phase3 #10: 직책 보유자만 노출 */}
+                  {!isReadOnly && myMembers.length > 0 && (
+                    <button onClick={()=>{setPickedKeys({});setMemberPickerOpen(true);}} className="flex items-center space-x-2 px-3 py-1.5 bg-blue-500 text-white rounded-lg text-sm hover:bg-opacity-90">
+                      <FileText size={14}/><span>구성원 본인평가 불러오기</span>
+                    </button>
+                  )}
+                </div>
                 <p className="text-sm text-gray-500 mb-4">본인의 주요성과를 기재해주세요 (최소 1건)</p>
                 {selfAchievements.map((a,i)=>(<div key={i} className="mb-4"><label className="block text-sm font-medium text-gray-700 mb-1">성과 {i+1}</label><textarea value={a} onChange={e=>{if(isReadOnly)return;const n=[...selfAchievements];n[i]=e.target.value;setSelfAchievements(n);}} rows={3} readOnly={isReadOnly} className={`w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-secondary focus:outline-none ${isReadOnly?"bg-gray-100":""}`} placeholder="성과 내용을 입력하세요..."/></div>))}
                 {!isReadOnly && <button onClick={()=>setSelfAchievements([...selfAchievements,""])} className="text-secondary text-sm font-medium mb-4">+ 성과 추가</button>}
@@ -615,7 +655,11 @@ export default function EvaluatePage() {
             {selectedRole === "first" && (
               <div className="bg-white rounded-lg shadow">
                 <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-                  <h2 className="text-lg font-bold text-primary">평가등록 현황</h2>
+                  <div className="flex items-center space-x-3">
+                    <h2 className="text-lg font-bold text-primary">평가등록 현황</h2>
+                    {/* Phase3 #12: 본인평가서 업로드 (대상자 클릭 시 모달 통해서) */}
+                    <span className="text-xs text-gray-400">※ 이름 클릭 → 상세 화면에서 본인평가서 업로드 가능</span>
+                  </div>
                   <div className="flex space-x-3">
                     {isReadOnly ? (
                       <button onClick={handleCancelSubmit} disabled={saving} className="flex items-center space-x-2 px-4 py-2 bg-orange-500 text-white rounded-lg text-sm hover:bg-opacity-90 disabled:opacity-50"><RotateCcw size={14}/><span>제출취소</span></button>
@@ -827,14 +871,75 @@ export default function EvaluatePage() {
             <div className="p-6 space-y-6">
               <div className="grid grid-cols-4 gap-3 text-sm"><div className="bg-light p-2 rounded"><span className="text-gray-500">본부</span><p className="font-medium">{detailEmp.department}</p></div><div className="bg-light p-2 rounded"><span className="text-gray-500">팀</span><p className="font-medium">{detailEmp.team}</p></div><div className="bg-light p-2 rounded"><span className="text-gray-500">직책</span><p className="font-medium">{detailEmp.title}</p></div><div className="bg-light p-2 rounded"><span className="text-gray-500">그룹</span><p className="font-medium">{detailEmp.group_type}</p></div></div>
               {getSelfEval(detailEmp.id) && <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center justify-between"><div><p className="font-bold text-blue-700 text-sm">본인업적기술서 등록됨</p><p className="text-xs text-blue-600">{getSelfEval(detailEmp.id)?.content_json?.achievements?.length||0}건의 성과</p></div>{!isReadOnly&&<button onClick={()=>{const sa=getSelfEval(detailEmp.id)?.content_json;if(sa?.achievements){const a=sa.achievements;setDetailAchievements(a.length>=3?a:[...a,...Array(3-a.length).fill("")]);}}} className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium">불러오기</button>}</div>}
+              {/* Phase3 #12: 본인평가서 첨부 파일 */}
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3"><div className="flex items-center justify-between mb-2"><p className="text-sm font-bold text-gray-700">📎 본인평가서 첨부 파일</p>{!isReadOnly && <label className="flex items-center space-x-1 px-3 py-1.5 bg-blue-500 text-white rounded text-xs cursor-pointer hover:bg-opacity-90"><Upload size={12}/><span>파일 선택</span><input type="file" className="hidden" onChange={(e)=>{const f=e.target.files?.[0];if(!f)return;if(f.size>5*1024*1024){alert("5MB 이하 파일만 가능합니다");return;}const reader=new FileReader();reader.onload=()=>{setUploadFile({name:f.name,data:reader.result as string,size:f.size});};reader.readAsDataURL(f);}} /></label>}</div>{(()=>{const ex=getFirstEval(detailEmp.id)?.content_json?.attachedFile;const file=uploadFile||ex;if(!file)return <p className="text-xs text-gray-500">첨부 파일이 없습니다.</p>;return <div className="flex items-center justify-between bg-white rounded p-2"><span className="text-xs text-gray-700">📄 {file.name} ({Math.round(file.size/1024)} KB){uploadFile&&<span className="ml-2 text-blue-600 font-bold">(신규)</span>}</span><a href={file.data} download={file.name} className="flex items-center space-x-1 px-2 py-1 bg-green-500 text-white rounded text-xs hover:bg-opacity-90"><Download size={12}/><span>다운로드</span></a></div>;})()}</div>
               <div><h3 className="text-sm font-bold text-gray-500 mb-2">주요 성과</h3>{detailAchievements.map((a,i)=>(<div key={i} className="mb-3"><label className="text-xs font-medium text-gray-600">성과 {i+1}</label><textarea value={a} onChange={e=>{if(isReadOnly)return;const n=[...detailAchievements];n[i]=e.target.value;setDetailAchievements(n);}} rows={2} readOnly={isReadOnly} className={`w-full px-3 py-2 border border-gray-300 rounded text-sm ${isReadOnly?"bg-gray-100":""}`}/></div>))}{!isReadOnly&&<button onClick={()=>setDetailAchievements([...detailAchievements,""])} className="text-secondary text-xs">+ 추가</button>}</div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="border rounded-lg p-4"><h3 className="text-sm font-bold text-primary mb-3">성과평가 (70%)</h3>{PERF.map(p=>(<div key={p.k} className="flex items-center justify-between mb-2"><span className="text-sm">{p.l} ({p.w}%)</span><select value={detailScores[p.k]??0} onChange={e=>setDetailScores({...detailScores,[p.k]:Number(e.target.value)})} disabled={isReadOnly} className="w-20 text-center border rounded py-1 text-sm disabled:bg-gray-100"><option value={0}>선택없음</option>{[1,2,3,4,5,6,7].map(v=>(<option key={v} value={v}>{v}</option>))}</select></div>))}<div className="pt-2 border-t font-bold text-primary flex justify-between"><span>합계</span><span>{Math.round(calcScore(PERF,detailScores)*100)/100}</span></div></div>
                 <div className="border rounded-lg p-4"><h3 className="text-sm font-bold text-primary mb-3">역량평가 (30%)</h3>{COMP.map(p=>(<div key={p.k} className="flex items-center justify-between mb-2"><span className="text-sm">{p.l} ({p.w}%)</span><select value={detailScores[p.k]??0} onChange={e=>setDetailScores({...detailScores,[p.k]:Number(e.target.value)})} disabled={isReadOnly} className="w-20 text-center border rounded py-1 text-sm disabled:bg-gray-100"><option value={0}>선택없음</option>{[1,2,3,4,5,6,7].map(v=>(<option key={v} value={v}>{v}</option>))}</select></div>))}<div className="pt-2 border-t font-bold text-primary flex justify-between"><span>합계</span><span>{Math.round(calcScore(COMP,detailScores)*100)/100}</span></div></div>
               </div>
+              <div className="bg-primary text-white rounded-lg p-4 text-center"><span className="text-sm">종합점수</span><p className="text-4xl font-bold">{Math.round((calcScore(PERF,detailScores)*0.7+calcScore(COMP,detailScores)*0.3)*100)/100}</p></div>
               <div><h3 className="text-sm font-bold text-gray-500 mb-2">개선사항 및 육성계획 <span className="text-xs font-normal text-red-500">(50자 이상 필수)</span></h3><textarea value={detailComment} onChange={e=>{if(isReadOnly)return;setDetailComment(e.target.value);}} rows={3} readOnly={isReadOnly} className={`w-full px-3 py-2 border border-gray-300 rounded text-sm ${isReadOnly?"bg-gray-100":""}`} placeholder="개선사항 및 육성계획을 50자 이상 입력하세요..."/><p className={`text-xs mt-1 ${detailComment.length>=50?"text-green-600":"text-red-500"}`}>{detailComment.length}자 {detailComment.length>=50?"✓":"(50자 이상 필요)"}</p></div>
             </div>
             <div className="flex justify-end space-x-3 p-6 border-t sticky bottom-0 bg-white rounded-b-xl"><button onClick={()=>setDetailEmp(null)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm">취소</button>{!isReadOnly&&<button onClick={handleSaveDetail} disabled={saving} className="flex items-center space-x-2 px-6 py-2 bg-secondary text-white rounded-lg text-sm disabled:opacity-50"><Save size={14}/><span>저장</span></button>}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Phase3 #10: 구성원 본인평가 불러오기 모달 */}
+      {memberPickerOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={()=>setMemberPickerOpen(false)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+            <div className="flex items-center justify-between p-6 border-b sticky top-0 bg-white rounded-t-xl"><h2 className="text-xl font-bold text-primary">구성원 본인평가 불러오기</h2><button onClick={()=>setMemberPickerOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={24}/></button></div>
+            <div className="p-6 space-y-3">
+              <p className="text-sm text-gray-600">아래 구성원의 본인평가 성과 중 가져올 항목을 선택하세요.</p>
+              {myMembers.length === 0 && <p className="text-sm text-gray-500 italic">평가 대상 구성원이 없습니다.</p>}
+              {myMembers.map(m => {
+                const sa = getSelfEval(m.id)?.content_json;
+                const ach = (sa && Array.isArray(sa.achievements)) ? sa.achievements as string[] : [];
+                return (
+                  <div key={m.id} className="border border-gray-200 rounded-lg p-3">
+                    <p className="text-sm font-bold text-primary mb-2">{m.name} <span className="text-xs text-gray-500 font-normal">({m.team || "-"})</span></p>
+                    {ach.length === 0 && <p className="text-xs text-gray-400 italic">본인평가 미등록</p>}
+                    {ach.map((text, idx) => {
+                      const key = m.id + "-" + idx;
+                      const checked = pickedKeys[key] || false;
+                      if (!text || !text.trim()) return null;
+                      return (
+                        <label key={key} className="flex items-start space-x-2 mb-2 cursor-pointer hover:bg-gray-50 p-2 rounded">
+                          <input type="checkbox" checked={checked} onChange={e=>setPickedKeys({...pickedKeys, [key]: e.target.checked})} className="mt-0.5" />
+                          <span className="text-xs text-gray-700 flex-1">{text}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex justify-end space-x-3 p-6 border-t sticky bottom-0 bg-white rounded-b-xl">
+              <button onClick={()=>setMemberPickerOpen(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm">취소</button>
+              <button onClick={()=>{
+                const selected: string[] = [];
+                myMembers.forEach(m => {
+                  const sa = getSelfEval(m.id)?.content_json;
+                  const ach = (sa && Array.isArray(sa.achievements)) ? sa.achievements as string[] : [];
+                  ach.forEach((text, idx) => {
+                    const key = m.id + "-" + idx;
+                    if (pickedKeys[key] && text && text.trim()) {
+                      selected.push("[" + m.name + "] " + text);
+                    }
+                  });
+                });
+                if (selected.length === 0) { alert("선택된 항목이 없습니다"); return; }
+                // 기존 본인평가 텍스트에 추가
+                const merged = [...selfAchievements.filter(a => a && a.trim()), ...selected];
+                while (merged.length < 3) merged.push("");
+                setSelfAchievements(merged);
+                setMemberPickerOpen(false);
+                setPickedKeys({});
+                alert(selected.length + "건이 본인평가로 불러와졌습니다.");
+              }} className="flex items-center space-x-2 px-6 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-opacity-90"><Download size={14}/><span>불러오기</span></button>
+            </div>
           </div>
         </div>
       )}
