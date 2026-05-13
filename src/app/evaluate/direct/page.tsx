@@ -47,6 +47,13 @@ const extractTeamFromTitle = (title: string | null | undefined): string | null =
   return null;
 };
 
+// Phase3-fix: 직책에 "센터장/팀장/실장" 포함 시 1차 평가자 권한 자동 부여
+const isFirstEvaluatorByTitle = (emp: Emp | null): boolean => {
+  if (!emp || !emp.title) return false;
+  const t = emp.title;
+  return t.indexOf("센터장") >= 0 || t.indexOf("팀장") >= 0 || t.indexOf("실장") >= 0;
+};
+
 export default function EvaluatePage() {
   const router = useRouter();
   const [user, setUser] = useState<Emp|null>(null);
@@ -93,13 +100,21 @@ export default function EvaluatePage() {
       if (ev) setEvals(ev);
       // 첫 진입에만 role/org 초기화 (저장 후 loadData 재호출 시엔 유지)
       if (isFirstLoadRef.current) {
+        // 우선순위: 본부장 → 직책 보유자(센터장/팀장/실장) → 명시적 role → 기본 self
         if (isHonbujang(udTyped)) setSelectedRole("first");
+        else if (isFirstEvaluatorByTitle(udTyped)) setSelectedRole("first");
         else if (udTyped.role === "first_evaluator") setSelectedRole("first");
         else if (udTyped.role === "second_evaluator") setSelectedRole("second");
         else if (udTyped.role === "admin") setSelectedRole("first");
         else if (udTyped.role === "ceo") setSelectedRole("ceo");
         else setSelectedRole("self");
-        if (udTyped.department) setSelectedOrg(udTyped.department + (udTyped.team ? "/" + udTyped.team : ""));
+        // 센터장은 자기 센터(team) 우선, 그 외엔 부서/팀
+        const extractedTeam = extractTeamFromTitle(udTyped.title);
+        if (extractedTeam && (udTyped.title || "").indexOf("센터장") >= 0) {
+          setSelectedOrg(extractedTeam);
+        } else if (udTyped.department) {
+          setSelectedOrg(udTyped.department + (udTyped.team ? "/" + udTyped.team : ""));
+        }
         isFirstLoadRef.current = false;
       }
     } catch(e) { console.error(e); } finally { setLoading(false); }
@@ -112,8 +127,8 @@ export default function EvaluatePage() {
     if (!isHonbujang(user)) {
       roles.push({value:"self",label:"본인평가"});
     }
-    // Phase3: 본부장에게 1차 평가자 권한 추가
-    if (user.role === "first_evaluator" || user.role === "admin" || isHonbujang(user)) {
+    // Phase3: 본부장 + 직책(센터장/팀장/실장) 보유자에게 1차 평가자 권한 자동 부여
+    if (user.role === "first_evaluator" || user.role === "admin" || isHonbujang(user) || isFirstEvaluatorByTitle(user)) {
       roles.push({value:"first",label:"1차 평가자"});
     }
     if (user.role === "second_evaluator" || user.role === "admin" || isHonbujang(user)) {
@@ -817,7 +832,6 @@ export default function EvaluatePage() {
                 <div className="border rounded-lg p-4"><h3 className="text-sm font-bold text-primary mb-3">성과평가 (70%)</h3>{PERF.map(p=>(<div key={p.k} className="flex items-center justify-between mb-2"><span className="text-sm">{p.l} ({p.w}%)</span><select value={detailScores[p.k]??0} onChange={e=>setDetailScores({...detailScores,[p.k]:Number(e.target.value)})} disabled={isReadOnly} className="w-20 text-center border rounded py-1 text-sm disabled:bg-gray-100"><option value={0}>선택없음</option>{[1,2,3,4,5,6,7].map(v=>(<option key={v} value={v}>{v}</option>))}</select></div>))}<div className="pt-2 border-t font-bold text-primary flex justify-between"><span>합계</span><span>{Math.round(calcScore(PERF,detailScores)*100)/100}</span></div></div>
                 <div className="border rounded-lg p-4"><h3 className="text-sm font-bold text-primary mb-3">역량평가 (30%)</h3>{COMP.map(p=>(<div key={p.k} className="flex items-center justify-between mb-2"><span className="text-sm">{p.l} ({p.w}%)</span><select value={detailScores[p.k]??0} onChange={e=>setDetailScores({...detailScores,[p.k]:Number(e.target.value)})} disabled={isReadOnly} className="w-20 text-center border rounded py-1 text-sm disabled:bg-gray-100"><option value={0}>선택없음</option>{[1,2,3,4,5,6,7].map(v=>(<option key={v} value={v}>{v}</option>))}</select></div>))}<div className="pt-2 border-t font-bold text-primary flex justify-between"><span>합계</span><span>{Math.round(calcScore(COMP,detailScores)*100)/100}</span></div></div>
               </div>
-              <div className="bg-primary text-white rounded-lg p-4 text-center"><span className="text-sm">종합점수</span><p className="text-4xl font-bold">{Math.round((calcScore(PERF,detailScores)*0.7+calcScore(COMP,detailScores)*0.3)*100)/100}</p></div>
               <div><h3 className="text-sm font-bold text-gray-500 mb-2">개선사항 및 육성계획 <span className="text-xs font-normal text-red-500">(50자 이상 필수)</span></h3><textarea value={detailComment} onChange={e=>{if(isReadOnly)return;setDetailComment(e.target.value);}} rows={3} readOnly={isReadOnly} className={`w-full px-3 py-2 border border-gray-300 rounded text-sm ${isReadOnly?"bg-gray-100":""}`} placeholder="개선사항 및 육성계획을 50자 이상 입력하세요..."/><p className={`text-xs mt-1 ${detailComment.length>=50?"text-green-600":"text-red-500"}`}>{detailComment.length}자 {detailComment.length>=50?"✓":"(50자 이상 필요)"}</p></div>
             </div>
             <div className="flex justify-end space-x-3 p-6 border-t sticky bottom-0 bg-white rounded-b-xl"><button onClick={()=>setDetailEmp(null)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm">취소</button>{!isReadOnly&&<button onClick={handleSaveDetail} disabled={saving} className="flex items-center space-x-2 px-6 py-2 bg-secondary text-white rounded-lg text-sm disabled:opacity-50"><Save size={14}/><span>저장</span></button>}</div>
