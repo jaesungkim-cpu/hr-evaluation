@@ -349,13 +349,24 @@ export default function EvaluatePage() {
     alert("제출이 완료되었습니다.");
   };
 
-  // Phase1 #1: 제출취소
+  // Phase1 #1: 제출취소 / Phase3 #2: 관리자 확정 시 차단
   const handleCancelSubmit = async () => {
+    const ft = selectedRole === "first" ? "evaluation_opinion" : selectedRole === "self" ? "self_assessment" : "department_evaluation";
+    const targetList = selectedRole === "self" ? [user!] : evaluatees;
+    // 관리자 확정된 평가가 있으면 제출취소 차단
+    const confirmedList: string[] = [];
+    for (let i=0; i<targetList.length; i++) {
+      const emp = targetList[i];
+      const existing = getEval(emp.id, ft);
+      if (existing?.content_json?.adminConfirmed) confirmedList.push(emp.name || "");
+    }
+    if (confirmedList.length > 0) {
+      alert("관리자가 확정 처리한 평가가 있어 제출취소가 불가합니다.\n\n확정된 대상자:\n" + confirmedList.join(", ") + "\n\n관리자에게 확정 해제를 요청해주세요.");
+      return;
+    }
     if (!window.confirm("제출을 취소하시겠습니까?\n취소 후 수정 가능 상태로 전환됩니다.")) return;
     setSaving(true);
     try {
-      const ft = selectedRole === "first" ? "evaluation_opinion" : selectedRole === "self" ? "self_assessment" : "department_evaluation";
-      const targetList = selectedRole === "self" ? [user!] : evaluatees;
       for (let i=0; i<targetList.length; i++) {
         const emp = targetList[i];
         const existing = getEval(emp.id, ft);
@@ -931,7 +942,6 @@ export default function EvaluatePage() {
                   });
                 });
                 if (selected.length === 0) { alert("선택된 항목이 없습니다"); return; }
-                // 기존 본인평가 텍스트에 추가
                 const merged = [...selfAchievements.filter(a => a && a.trim()), ...selected];
                 while (merged.length < 3) merged.push("");
                 setSelfAchievements(merged);
