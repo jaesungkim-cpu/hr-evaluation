@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { Employee } from '@/lib/types';
@@ -17,6 +17,10 @@ export default function AdminPage() {
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [editForm, setEditForm] = useState<Record<string, any>>({});
   const [saving, setSaving] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadResult, setUploadResult] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { loadAdminData(); }, []);
   const loadAdminData = async () => {
@@ -44,6 +48,22 @@ export default function AdminPage() {
   if (!user) return <div className="flex items-center justify-center min-h-screen"><p className="text-gray-600">관리자 권한이 필요합니다</p></div>;
   const filteredEmployees = employees.filter((emp) => emp.name.includes(searchTerm) || emp.email.includes(searchTerm) || emp.employee_number.includes(searchTerm));
 
+  const handleExcelUpload = async () => {
+    if (!uploadFile) return;
+    setUploading(true); setUploadResult(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', uploadFile);
+      const res = await fetch('/api/admin/upload-members', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (data.success) {
+        setUploadResult('✅ ' + data.message + (data.warning ? ' ⚠️ ' + data.warning : ''));
+        setUploadFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        await loadAdminData();
+      } else { setUploadResult('❌ ' + (data.error || '업로드 실패')); }
+    } catch { setUploadResult('❌ 네트워크 오류'); } finally { setUploading(false); }
+  };
   return (
     <div className="container mx-auto py-8">
       <div className="mb-8"><h1 className="text-3xl font-bold text-primary mb-2">관리자 패널</h1><p className="text-gray-600">구성원 정보 및 평가 데이터 관리</p></div>
@@ -56,6 +76,16 @@ export default function AdminPage() {
       <div className="bg-white rounded-lg shadow">
         <div className="p-6 border-b border-gray-200"><h2 className="text-xl font-bold text-primary mb-4">구성원 목록</h2><input type="text" placeholder="이름, 이메일 또는 사원번호로 검색" value={searchTerm} onChange={(e)=>setSearchTerm(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary"/></div>
         <div className="overflow-x-auto"><table className="w-full"><thead className="bg-light border-b border-gray-200"><tr><th className="text-left px-6 py-3 font-semibold text-gray-700">이름</th><th className="text-left px-6 py-3 font-semibold text-gray-700">이메일</th><th className="text-left px-6 py-3 font-semibold text-gray-700">부서</th><th className="text-left px-6 py-3 font-semibold text-gray-700">역할</th><th className="text-left px-6 py-3 font-semibold text-gray-700">평가대상</th><th className="text-left px-6 py-3 font-semibold text-gray-700">작업</th></tr></thead>
+        <div className="bg-white rounded-lg shadow p-6 mb-6">
+          <h2 className="text-xl font-bold text-primary mb-4">구성원 일괄 업로드 (엑셀)</h2>
+          <div className="flex items-center gap-4">
+            <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={e => setUploadFile(e.target.files?.[0] || null)} className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-white hover:file:bg-primary/80" />
+            <button onClick={handleExcelUpload} disabled={!uploadFile || uploading} className="flex items-center space-x-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/80 disabled:opacity-50 disabled:cursor-not-allowed transition">
+              <Upload className="w-4 h-4" /><span>{uploading ? '업로드 중...' : '업로드'}</span>
+            </button>
+          </div>
+          {uploadResult && <p className={`mt-3 text-sm ${uploadResult.startsWith('✅') ? 'text-green-600' : 'text-red-600'}`}>{uploadResult}</p>}
+        </div>
           <tbody>{filteredEmployees.map((emp) => (<tr key={emp.id} className="border-b border-gray-200 hover:bg-light transition"><td className="px-6 py-3"><div><p className="font-medium text-gray-900">{emp.name}</p><p className="text-xs text-gray-600">{emp.title}</p></div></td><td className="px-6 py-3 text-sm text-gray-600">{emp.email}</td><td className="px-6 py-3 text-sm text-gray-600">{emp.department}</td><td className="px-6 py-3 text-sm"><span className="px-3 py-1 bg-secondary bg-opacity-10 text-secondary rounded-full text-xs font-medium">{USER_ROLES[emp.role]||emp.role}</span></td><td className="px-6 py-3 text-sm">{emp.is_evaluated?<span className="text-success">예</span>:<span className="text-gray-500">아니오</span>}</td><td className="px-6 py-3 text-sm"><button onClick={()=>openEditModal(emp)} className="text-secondary hover:text-primary transition font-medium">편집</button></td></tr>))}</tbody></table></div>
         {filteredEmployees.length===0&&<div className="text-center py-12"><p className="text-gray-600">검색 결과가 없습니다</p></div>}
       </div>
