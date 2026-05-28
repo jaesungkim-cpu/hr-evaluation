@@ -230,14 +230,32 @@ export default function EvaluatePage() {
       </div>
 
       {/* Self Assessment */}
-      {selfAssessment && (
-        <div className="bg-light rounded-lg p-6 mb-6 border-l-4 border-secondary">
-          <h3 className="font-bold text-primary mb-2">자체 평가 내용</h3>
-          <p className="text-sm text-gray-700 whitespace-pre-wrap">
-            {JSON.stringify(selfAssessment.content_json, null, 2)}
-          </p>
-        </div>
-      )}
+      {selfAssessment && (() => {
+        const c = selfAssessment.content_json as any;
+        const ach: string[] = Array.isArray(c?.achievements) ? c.achievements : [];
+        const conAch: string[] = Array.isArray(c?.concurrentAchievements) ? c.concurrentAchievements : [];
+        return (
+          <div className="bg-light rounded-lg p-6 mb-6 border-l-4 border-secondary">
+            <h3 className="font-bold text-primary mb-3">자체 평가 내용</h3>
+            {ach.length > 0 && (
+              <div className="mb-4">
+                <p className="font-semibold text-sm text-gray-600 mb-2">주요 성과</p>
+                <ul className="list-disc pl-5 space-y-2 text-sm text-gray-700">
+                  {ach.map((a: string, i: number) => <li key={i}>{a}</li>)}
+                </ul>
+              </div>
+            )}
+            {conAch.length > 0 && (
+              <div>
+                <p className="font-semibold text-sm text-gray-600 mb-2">겸직 성과</p>
+                <ul className="list-disc pl-5 space-y-2 text-sm text-gray-700">
+                  {conAch.map((a: string, i: number) => <li key={i}>{a}</li>)}
+                </ul>
+              </div>
+            )}
+          </div>
+        );
+      })()}      )}
 
       {/* Evaluation Form or Grade Assignment */}
       {user.role === 'first_evaluator' ? (
