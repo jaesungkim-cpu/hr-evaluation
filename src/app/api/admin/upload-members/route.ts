@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
       }))
       .filter(e => e.name && e.employee_number && e.email);
     if (employees.length === 0) return NextResponse.json({ error: '유효한 데이터가 없습니다.' }, { status: 400 });
-    const { error: upsertError } = await supabase.from('employees').upsert(employees, { onConflict: 'employee_number' });
+    const { error: upsertError } = await supabase.from('employees').upsert(employees, { onConflict: 'email' });
     if (upsertError) return NextResponse.json({ error: `업로드 오류: ${upsertError.message}` }, { status: 500 });
     return NextResponse.json({ success: true, count: employees.length, message: `${employees.length}명의 구성원 정보가 업데이트되었습니다.`, warning: warning || undefined });
   } catch (err) {
